@@ -1,0 +1,11 @@
+build/
+cmake-build/
+python_example/
+.git/
+.gitignore
+.env
+.env.*
+*.md
+__pycache__/
+.venv/
+venv/

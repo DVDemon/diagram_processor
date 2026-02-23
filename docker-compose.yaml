@@ -1,0 +1,23 @@
+# Настройки загружаются из .env (скопируйте .env_example в .env)
+services:
+  poco_template_server:
+    build: .
+    ports:
+      - "${PORT:-8080}:${PORT:-8080}"
+    env_file:
+      - .env
+    environment:
+      PORT: ${PORT:-8080}
+      LOG_LEVEL: ${LOG_LEVEL:-information}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_API_URL: ${OPENAI_API_URL:-https://api.deepseek.com}
+      OPENAI_MODEL: ${OPENAI_MODEL:-deepseek-chat}
+      OPENAI_SYSTEM_PROMPT: ${OPENAI_SYSTEM_PROMPT:-}
+      OPENAI_TIMEOUT: ${OPENAI_TIMEOUT:-60}
+      OPENAI_SSL_VERIFY: ${OPENAI_SSL_VERIFY:-false}
+      CONFLUENCE_URL: ${CONFLUENCE_URL:-}
+      CONFLUENCE_USER: ${CONFLUENCE_USER:-}
+      CONFLUENCE_TOKEN: ${CONFLUENCE_TOKEN:-}
+      CONFLUENCE_API_TYPE: ${CONFLUENCE_API_TYPE:-server}
+      CONFLUENCE_TIMEOUT: ${CONFLUENCE_TIMEOUT:-30}
+      CONFLUENCE_SSL_VERIFY: ${CONFLUENCE_SSL_VERIFY:-false}
