@@ -65,6 +65,12 @@ docker build -t poco_template_server .
 docker run -p 8080:8080 --env-file .env poco_template_server
 ```
 
+Прогон тестов
+
+```bash
+docker build -f Dockerfile.test -t poco_ai_server_test . && docker run --rm poco_ai_server_test
+ ```
+
 ## Формат ответа парсеров диаграмм
 
 ### PlantUML Sequence
