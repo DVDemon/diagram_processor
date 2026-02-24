@@ -24,6 +24,7 @@ RUN mkdir cmake-build && cd cmake-build \
 WORKDIR /build/app
 COPY CMakeLists.txt ./
 COPY src ./src/
+COPY test ./test/
 RUN mkdir build && cd build \
     && cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=/usr/local \
     && cmake --build . -j$(nproc)
