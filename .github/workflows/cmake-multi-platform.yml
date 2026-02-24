@@ -53,8 +53,8 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y --no-install-recommends build-essential cmake git libssl-dev zlib1g-dev
         git clone --depth 1 --branch poco-1.15.0-release https://github.com/pocoproject/poco.git /tmp/poco
-        cd /tmp/poco && mkdir build && cd build
-        cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local
+        cd /tmp/poco && mkdir -p build && cd build
+        cmake -S .. -B . -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local
         sudo cmake --build . --target install -j$(nproc)
 
     - name: Install Poco (Windows)
