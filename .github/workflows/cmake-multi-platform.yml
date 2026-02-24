@@ -59,12 +59,12 @@ jobs:
 
     - name: Install Poco (Windows)
       if: runner.os == 'Windows'
-      uses: lukka/run-vcpkg@v11
-      with:
-        vcpkgDirectory: ${{ runner.temp }}/vcpkg
-        vcpkgGitCommitId: '5b1214315250939257ef5d62ecdcbca18cf4fb1c'
-        runVcpkgInstall: true
-        vcpkgJsonGlob: 'vcpkg.json'
+      shell: pwsh
+      run: |
+        git clone --depth 1 https://github.com/microsoft/vcpkg.git $env:RUNNER_TEMP\vcpkg
+        & "$env:RUNNER_TEMP\vcpkg\bootstrap-vcpkg.bat" -disableMetrics
+        & "$env:RUNNER_TEMP\vcpkg\vcpkg" install poco[net,netssl,json,util,prometheus] --triplet x64-windows
+        "VCPKG_ROOT=$env:RUNNER_TEMP\vcpkg" | Out-File -FilePath $env:GITHUB_ENV -Append
 
     - name: Set reusable strings
       # Turn repeated input strings (such as the build output directory) into step outputs. These step outputs can be used throughout the workflow file.
