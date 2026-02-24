@@ -1,0 +1,7 @@
+{
+  "name": "poco-ai-server",
+  "version": "1.0.0",
+  "dependencies": [
+    "poco[net,netssl,json,util,prometheus]"
+  ]
+}
