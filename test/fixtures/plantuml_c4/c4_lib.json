@@ -1,0 +1,13 @@
+{
+  "success": true,
+  "components": [
+    {"id": "user", "code": "user", "name": "Customer", "c4_type": "Person"},
+    {"id": "webapp", "code": "webapp", "name": "Web Application", "c4_type": "SoftwareSystem"},
+    {"id": "payment", "code": "payment", "name": "Payment Gateway", "c4_type": "SoftwareSystem"}
+  ],
+  "requests": [
+    {"request_id": 1, "component_source_id": "user", "component_target_id": "webapp", "description": "Browses"},
+    {"request_id": 2, "component_source_id": "webapp", "component_target_id": "payment", "description": "Processes payment"}
+  ],
+  "parent_child": []
+}

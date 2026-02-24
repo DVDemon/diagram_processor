@@ -1,0 +1,18 @@
+<h1>Design</h1>
+<h2>Login Flow</h2>
+<ac:structured-macro ac:name="plantuml">
+  <ac:plain-text-body><![CDATA[@startuml
+actor User
+participant "Auth Service" as Auth
+User -> Auth : Login
+Auth --> User : Token
+@enduml]]></ac:plain-text-body>
+</ac:structured-macro>
+<h2>Data Flow</h2>
+<ac:structured-macro ac:name="plantuml">
+  <ac:plain-text-body><![CDATA[@startuml
+rectangle "==API" <<Container>> as api
+rectangle "==DB" <<Container>> as db
+api .[].> db : "Query"
+@enduml]]></ac:plain-text-body>
+</ac:structured-macro>

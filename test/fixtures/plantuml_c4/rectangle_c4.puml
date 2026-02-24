@@ -1,0 +1,6 @@
+@startuml
+rectangle "==My System" <<SoftwareSystem>> as sys1
+rectangle "==External API" <<Container>> as ext1
+
+sys1 .[#red].> ext1 : "REST API"
+@enduml

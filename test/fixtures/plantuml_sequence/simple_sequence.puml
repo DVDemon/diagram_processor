@@ -1,0 +1,10 @@
+@startuml
+participant "User" as User
+participant "API" as API
+participant "Database" as DB
+
+User -> API : Login request
+API -> DB : Query user
+DB --> API : User data
+API --> User : Auth token
+@enduml

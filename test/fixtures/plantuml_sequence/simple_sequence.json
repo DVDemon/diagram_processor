@@ -1,0 +1,14 @@
+{
+  "success": true,
+  "components": [
+    {"id": "User", "code": "User", "name": "User"},
+    {"id": "API", "code": "API", "name": "API"},
+    {"id": "DB", "code": "DB", "name": "Database"}
+  ],
+  "requests": [
+    {"request_id": 1, "component_source_id": "User", "component_target_id": "API", "description": "Login request"},
+    {"request_id": 2, "component_source_id": "API", "component_target_id": "DB", "description": "Query user"},
+    {"request_id": 3, "component_source_id": "DB", "component_target_id": "API", "description": "User data"},
+    {"request_id": 4, "component_source_id": "API", "component_target_id": "User", "description": "Auth token"}
+  ]
+}

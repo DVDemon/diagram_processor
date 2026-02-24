@@ -1,0 +1,14 @@
+{
+  "success": true,
+  "components": [
+    {"id": "Client", "code": "Client", "name": "Client"},
+    {"id": "Backend", "code": "Backend", "name": "Backend Service"},
+    {"id": "Cache", "code": "Cache", "name": "Cache"}
+  ],
+  "requests": [
+    {"request_id": 1, "component_source_id": "Client", "component_target_id": "Backend", "description": "Get data"},
+    {"request_id": 2, "component_source_id": "Backend", "component_target_id": "Cache", "description": "Check cache"},
+    {"request_id": 3, "component_source_id": "Cache", "component_target_id": "Backend", "description": "Cache miss"},
+    {"request_id": 4, "component_source_id": "Backend", "component_target_id": "Client", "description": "Return result"}
+  ]
+}

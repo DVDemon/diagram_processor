@@ -1,0 +1,14 @@
+{
+  "success": true,
+  "components": [
+    {"id": "user", "code": "user", "name": "User", "c4_type": "Person"},
+    {"id": "app", "code": "app", "name": "Web App", "c4_type": "SoftwareSystem"},
+    {"id": "db", "code": "db", "name": "Database", "c4_type": "Container"}
+  ],
+  "requests": [],
+  "parent_child": [
+    {"parent_id": "db", "child_id": "app"},
+    {"parent_id": "app", "child_id": "db"},
+    {"parent_id": "app", "child_id": "user"}
+  ]
+}

@@ -1,0 +1,10 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Context.puml
+
+Person(user, "Customer", "Uses the system")
+System(webapp, "Web Application", "Main app")
+System_Ext(payment, "Payment Gateway", "External payment")
+
+Rel(user, webapp, "Browses")
+Rel(webapp, payment, "Processes payment")
+@enduml

@@ -1,0 +1,11 @@
+{
+  "success": true,
+  "components": [
+    {"id": "sys1", "code": "sys1", "name": "My System", "c4_type": "SoftwareSystem"},
+    {"id": "ext1", "code": "ext1", "name": "External API", "c4_type": "SoftwareSystem"}
+  ],
+  "requests": [
+    {"request_id": 1, "component_source_id": "sys1", "component_target_id": "ext1", "description": "REST API"}
+  ],
+  "parent_child": []
+}

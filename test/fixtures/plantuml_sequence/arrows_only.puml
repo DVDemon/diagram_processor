@@ -1,0 +1,10 @@
+@startuml
+actor Client
+participant "Backend Service" as Backend
+participant "Cache" as Cache
+
+Client -> Backend : Get data
+Backend -> Cache : Check cache
+Cache --> Backend : Cache miss
+Backend --> Client : Return result
+@enduml

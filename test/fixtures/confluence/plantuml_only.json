@@ -1,0 +1,17 @@
+{
+  "count": 2,
+  "diagrams": [
+    {
+      "format": "plantuml",
+      "subtype": "sequence",
+      "sectionTitle": "Login Flow",
+      "textLength": 106
+    },
+    {
+      "format": "plantuml",
+      "subtype": "c4",
+      "sectionTitle": "Data Flow",
+      "textLength": 116
+    }
+  ]
+}

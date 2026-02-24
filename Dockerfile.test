@@ -1,0 +1,34 @@
+# Dockerfile for running unit tests
+FROM ubuntu:24.04
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    cmake \
+    git \
+    ca-certificates \
+    libssl-dev \
+    zlib1g-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Build POCO from source
+ARG POCO_VERSION=1.15.0
+WORKDIR /build
+RUN git clone --depth 1 --branch poco-${POCO_VERSION}-release https://github.com/pocoproject/poco.git
+
+WORKDIR /build/poco
+RUN mkdir cmake-build && cd cmake-build \
+    && cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local \
+    && cmake --build . --target install -j$(nproc)
+
+# Build application with tests
+WORKDIR /build/app
+COPY CMakeLists.txt ./
+COPY src ./src/
+COPY test ./test/
+
+RUN mkdir build && cd build \
+    && cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=/usr/local \
+    && cmake --build . -j$(nproc)
+
+WORKDIR /build/app/build
+CMD ["./parser_tests"]

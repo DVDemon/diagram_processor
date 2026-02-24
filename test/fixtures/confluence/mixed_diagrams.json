@@ -1,0 +1,17 @@
+{
+  "count": 2,
+  "diagrams": [
+    {
+      "format": "plantuml",
+      "subtype": "sequence",
+      "sectionTitle": "Sequence Diagram",
+      "textLength": 105
+    },
+    {
+      "format": "drawio",
+      "subtype": "c4",
+      "sectionTitle": "C4 Diagram",
+      "textLength": 242
+    }
+  ]
+}

@@ -1,0 +1,31 @@
+<mxfile host="test" modified="2024-01-01T00:00:00.000Z" version="21.0.0" type="device">
+  <diagram id="diag2" name="Page-1">
+    <mxGraphModel dx="800" dy="600" grid="1" gridSize="10">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <object id="user" c4Type="Person" c4Name="User">
+          <mxCell id="c1" parent="1">
+            <mxGeometry x="10" y="10" width="80" height="40" as="geometry"/>
+          </mxCell>
+        </object>
+        <object id="app" c4Type="SoftwareSystem" c4Name="Web App">
+          <mxCell id="c2" parent="1">
+            <mxGeometry x="10" y="70" width="100" height="50" as="geometry"/>
+          </mxCell>
+        </object>
+        <object id="db" c4Type="Container" c4Name="Database">
+          <mxCell id="c3" parent="1">
+            <mxGeometry x="10" y="140" width="100" height="50" as="geometry"/>
+          </mxCell>
+        </object>
+        <object id="r1" c4Type="Relationship" c4Description="Uses">
+          <mxCell id="rc1" parent="1" source="user" target="app"></mxCell>
+        </object>
+        <object id="r2" c4Type="Relationship" c4Description="Stores data">
+          <mxCell id="rc2" parent="1" source="app" target="db"></mxCell>
+        </object>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

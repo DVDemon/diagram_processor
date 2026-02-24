@@ -1,0 +1,12 @@
+{
+  "success": true,
+  "components": [
+    {"id": "sys1", "code": "sys1", "name": "Backend", "c4_type": "SoftwareSystem"},
+    {"id": "cont1", "code": "cont1", "name": "API", "c4_type": "Container"}
+  ],
+  "requests": [],
+  "parent_child": [
+    {"parent_id": "sys1", "child_id": "cont1"},
+    {"parent_id": "cont1", "child_id": "sys1"}
+  ]
+}
