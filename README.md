@@ -4,12 +4,12 @@ REST сервер на C++ с использованием библиотеки 
 
 ## Endpoints
 
-- `POST /api/v1/process_with_ai` — обработка текста через AI (DeepSeek/OpenAI API)
-- `POST /api/v1/parse_plantuml_sequence` — разбор PlantUML Sequence диаграммы (components, requests)
-- `POST /api/v1/parse_plantuml_c4` — разбор PlantUML C4 диаграммы (components, requests)
-- `POST /api/v1/parse_drawio` — разбор DrawIO C4 диаграммы (components, requests, parent_child)
-- `GET /api/v1/load_confluence?page_id={id}` — загрузка страницы из Confluence
-- `GET /api/v1/parse_confluence?page_id={id}` — загрузка и разбор страницы (извлечение PlantUML и DrawIO)
+- `POST /api/v1/process_with_ai` — обработка текста через AI (DeepSeek/OpenAI). JSON: `{ "text" | "prompt" | "message": "..." }`
+- `POST /api/v1/parse_plantuml_sequence` — разбор PlantUML Sequence. JSON: `{ "text": "..." }`
+- `POST /api/v1/parse_plantuml_c4` — разбор PlantUML C4. JSON: `{ "text": "..." }`
+- `POST /api/v1/parse_drawio` — разбор DrawIO C4. JSON: `{ "text" | "xml" | "content" | "drawio": "..." }` (XML диаграммы)
+- `GET /api/v1/load_confluence?page_id={id}&include_subpages=0|1` — загрузка страницы из Confluence (HTML)
+- `GET /api/v1/parse_confluence?page_id={id}&include_subpages=0|1` — загрузка и разбор страницы (извлечение PlantUML и DrawIO диаграмм)
 - `GET /metrics` — метрики Prometheus
 - `GET /swagger.yaml` — OpenAPI спецификация в формате YAML
 
@@ -65,11 +65,11 @@ docker build -t poco_template_server .
 docker run -p 8080:8080 --env-file .env poco_template_server
 ```
 
-Прогон тестов
+## Прогон тестов
 
 ```bash
 docker build -f Dockerfile.test -t poco_ai_server_test . && docker run --rm poco_ai_server_test
- ```
+```
 
 ## Формат ответа парсеров диаграмм
 
@@ -83,9 +83,13 @@ docker build -f Dockerfile.test -t poco_ai_server_test . && docker run --rm poco
 - `parent_child` — иерархия родитель-потомок `{ hierarchy_id, parent_id, child_id }` (Container внутри System, Component внутри Container)
 
 ### DrawIO C4
-- `components` — массив `{ id, code, name, c4_type }` (имя из c4Name, при отсутствии — c4Description)
+- `components` — массив `{ id, code, name, c4_type }` (Person, SoftwareSystem, Container, Component, ContainerDiagramTitle и др.)
 - `requests` — массив `{ request_id, component_source_id, component_target_id, description }`
-- `parent_child` — иерархия родитель-потомок `{ hierarchy_id, parent_id, child_id }` (по геометрии)
+- `parent_child` — иерархия `{ hierarchy_id, parent_id, child_id }` (по геометрии вложенности)
+
+### Parse Confluence
+- `count` — количество найденных диаграмм
+- `diagrams` — массив `{ text, format, subtype, sectionTitle }` (format: plantuml|drawio)
 
 ## Call examples
 
@@ -121,9 +125,28 @@ curl -X POST http://localhost:8080/api/v1/parse_plantuml_c4 \
   -H "Content-Type: application/json" \
   -d '{"text":"@startuml\n!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Context.puml\n\nPerson(customer, \"Покупатель\", \"Покупает товары в интернет-магазине\")\nPerson(admin, \"Администратор\", \"Управляет товарами и заказами в системе\")\nSystem(system, \"Интернет-магазин\", \"Система для покупки товаров онлайн\")\nSystem_Ext(paymentSystem, \"Платежная система\", \"Обрабатывает платежи\")\nSystem_Ext(shippingSystem, \"Система доставки\", \"Организует доставку товаров\")\nSystem_Ext(externalAuth, \"Система авторизации\", \"Проводит авторизацию пользователей через OAuth2\")\n\nRel(customer, system, \"Покупает товары\")\nRel(admin, system, \"Управляет товарами и заказами\")\nRel(system, paymentSystem, \"Запрос на оплату\")\nRel(system, shippingSystem, \"Запрос на доставку\")\nRel(system, externalAuth, \"Запрос на авторизацию через OAuth2\")\n@enduml"}'
 
-# Разбор DrawIO C4 диаграммы. Принимает JSON с полем text, xml, content или drawio.
-# Ответ: components (id, code, name, c4_type), requests (request_id, component_source_id, component_target_id, description), parent_child (hierarchy_id, parent_id, child_id)
+# Разбор DrawIO C4. JSON с полем text, xml, content или drawio (XML диаграммы).
+# source/target связей должны быть в атрибутах внутреннего mxCell.
 curl -X POST http://localhost:8080/api/v1/parse_drawio \
   -H "Content-Type: application/json" \
-  -d '{"text": "<mxfile host=\"app.diagrams.net\"><diagram><mxGraphModel><root><mxCell id=\"0\"/><mxCell id=\"1\" parent=\"0\"/><object id=\"sys1\" c4Name=\"Интернет-магазин\" c4Type=\"SoftwareSystem\"><mxCell parent=\"1\"/><mxGeometry x=\"20\" y=\"40\" width=\"120\" height=\"60\" as=\"geometry\"/></object><object id=\"sys2\" c4Name=\"Платёжная система\" c4Type=\"SoftwareSystem\"><mxCell parent=\"1\"/><mxGeometry x=\"200\" y=\"40\" width=\"120\" height=\"60\" as=\"geometry\"/></object><object id=\"rel1\" c4Type=\"Relationship\" c4Description=\"Запрос на оплату\" c4Technology=\"REST\" source=\"sys1\" target=\"sys2\"><mxCell parent=\"1\"/></object></root></mxGraphModel></diagram></mxfile>"}'
+  -d '{"text": "<mxfile host=\"app.diagrams.net\"><diagram><mxGraphModel><root><mxCell id=\"0\"/><mxCell id=\"1\" parent=\"0\"/><object id=\"sys1\" c4Name=\"Интернет-магазин\" c4Type=\"SoftwareSystem\"><mxCell parent=\"1\"/><mxGeometry x=\"20\" y=\"40\" width=\"120\" height=\"60\" as=\"geometry\"/></object><object id=\"sys2\" c4Name=\"Платёжная система\" c4Type=\"SoftwareSystem\"><mxCell parent=\"1\"/><mxGeometry x=\"200\" y=\"40\" width=\"120\" height=\"60\" as=\"geometry\"/></object><object id=\"rel1\" c4Type=\"Relationship\" c4Description=\"Запрос на оплату\"><mxCell parent=\"1\" source=\"sys1\" target=\"sys2\"/></object></root></mxGraphModel></diagram></mxfile>"}'
+```
 
+## Конвертация json в диаграмму
+
+```bash
+# из stdin
+python3 scripts/json2dot.py < input.json
+
+# из файла
+python3 scripts/json2dot.py input.json
+
+# вывод в файл
+python3 scripts/json2dot.py input.json -o output.dot
+```
+
+Пример:
+
+```bash
+python3 scripts/json2dot.py test/fixtures/drawio/complex.json | dot -Tpng -o diagram.png
+```

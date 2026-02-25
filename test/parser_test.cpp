@@ -211,7 +211,8 @@ INSTANTIATE_TEST_SUITE_P(
     DrawioTest,
     ::testing::Values(
         std::make_pair("simple_c4", "simple_c4"),
-        std::make_pair("multi_component", "multi_component")
+        std::make_pair("multi_component", "multi_component"),
+        std::make_pair("complex", "complex")
     )
 );
 

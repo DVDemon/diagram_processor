@@ -1,0 +1,286 @@
+{
+  "components": [
+    {
+      "c4_type": "Component",
+      "code": "FFSMKA6x0Sx2fmrL-m3C-1",
+      "id": "FFSMKA6x0Sx2fmrL-m3C-1",
+      "name": "ScenarioManager"
+    },
+    {
+      "c4_type": "Component",
+      "code": "FFSMKA6x0Sx2fmrL-m3C-2",
+      "id": "FFSMKA6x0Sx2fmrL-m3C-2",
+      "name": "Identity Service"
+    },
+    {
+      "c4_type": "Software System",
+      "code": "FFSMKA6x0Sx2fmrL-m3C-20",
+      "id": "FFSMKA6x0Sx2fmrL-m3C-20",
+      "name": "VectorDB"
+    },
+    {
+      "c4_type": "SoftwareSystem",
+      "code": "FFSMKA6x0Sx2fmrL-m3C-22",
+      "id": "FFSMKA6x0Sx2fmrL-m3C-22",
+      "name": "SMP"
+    },
+    {
+      "c4_type": "Software System",
+      "code": "FFSMKA6x0Sx2fmrL-m3C-24",
+      "id": "FFSMKA6x0Sx2fmrL-m3C-24",
+      "name": "GitLab"
+    },
+    {
+      "c4_type": "Component",
+      "code": "FFSMKA6x0Sx2fmrL-m3C-26",
+      "id": "FFSMKA6x0Sx2fmrL-m3C-26",
+      "name": "Adapters"
+    },
+    {
+      "c4_type": "Software System",
+      "code": "FFSMKA6x0Sx2fmrL-m3C-28",
+      "id": "FFSMKA6x0Sx2fmrL-m3C-28",
+      "name": "eAuth"
+    },
+    {
+      "c4_type": "Component",
+      "code": "FFSMKA6x0Sx2fmrL-m3C-3",
+      "id": "FFSMKA6x0Sx2fmrL-m3C-3",
+      "name": "LLM Service"
+    },
+    {
+      "c4_type": "Component",
+      "code": "FFSMKA6x0Sx2fmrL-m3C-30",
+      "id": "FFSMKA6x0Sx2fmrL-m3C-30",
+      "name": "LLM"
+    },
+    {
+      "c4_type": "Container",
+      "code": "FFSMKA6x0Sx2fmrL-m3C-32",
+      "id": "FFSMKA6x0Sx2fmrL-m3C-32",
+      "name": "VectorDB"
+    },
+    {
+      "c4_type": "Component",
+      "code": "FFSMKA6x0Sx2fmrL-m3C-35",
+      "id": "FFSMKA6x0Sx2fmrL-m3C-35",
+      "name": "BertInference Service"
+    },
+    {
+      "c4_type": "Software System",
+      "code": "FFSMKA6x0Sx2fmrL-m3C-38",
+      "id": "FFSMKA6x0Sx2fmrL-m3C-38",
+      "name": "Assistance Platform"
+    },
+    {
+      "c4_type": "Component",
+      "code": "FFSMKA6x0Sx2fmrL-m3C-4",
+      "id": "FFSMKA6x0Sx2fmrL-m3C-4",
+      "name": "TextKit"
+    },
+    {
+      "c4_type": "Container",
+      "code": "FFSMKA6x0Sx2fmrL-m3C-5",
+      "id": "FFSMKA6x0Sx2fmrL-m3C-5",
+      "name": "RabbitMQ"
+    },
+    {
+      "c4_type": "Component",
+      "code": "n4nqFmEmNr8UNFELIVMs-1",
+      "id": "n4nqFmEmNr8UNFELIVMs-1",
+      "name": "UI редактора сценариев"
+    },
+    {
+      "c4_type": "Person",
+      "code": "n4nqFmEmNr8UNFELIVMs-2",
+      "id": "n4nqFmEmNr8UNFELIVMs-2",
+      "name": "Users"
+    },
+    {
+      "c4_type": "Person",
+      "code": "n4nqFmEmNr8UNFELIVMs-4",
+      "id": "n4nqFmEmNr8UNFELIVMs-4",
+      "name": "Analyst"
+    },
+    {
+      "c4_type": "Component",
+      "code": "n4nqFmEmNr8UNFELIVMs-5",
+      "id": "n4nqFmEmNr8UNFELIVMs-5",
+      "name": "UI взаимодействия с LLM"
+    }
+  ],
+  "parent_child": [
+    {
+      "child_id": "FFSMKA6x0Sx2fmrL-m3C-1",
+      "hierarchy_id": 1,
+      "parent_id": "FFSMKA6x0Sx2fmrL-m3C-38"
+    },
+    {
+      "child_id": "FFSMKA6x0Sx2fmrL-m3C-2",
+      "hierarchy_id": 2,
+      "parent_id": "FFSMKA6x0Sx2fmrL-m3C-38"
+    },
+    {
+      "child_id": "FFSMKA6x0Sx2fmrL-m3C-26",
+      "hierarchy_id": 3,
+      "parent_id": "FFSMKA6x0Sx2fmrL-m3C-38"
+    },
+    {
+      "child_id": "FFSMKA6x0Sx2fmrL-m3C-3",
+      "hierarchy_id": 4,
+      "parent_id": "FFSMKA6x0Sx2fmrL-m3C-38"
+    },
+    {
+      "child_id": "FFSMKA6x0Sx2fmrL-m3C-30",
+      "hierarchy_id": 5,
+      "parent_id": "FFSMKA6x0Sx2fmrL-m3C-38"
+    },
+    {
+      "child_id": "FFSMKA6x0Sx2fmrL-m3C-32",
+      "hierarchy_id": 6,
+      "parent_id": "FFSMKA6x0Sx2fmrL-m3C-38"
+    },
+    {
+      "child_id": "FFSMKA6x0Sx2fmrL-m3C-35",
+      "hierarchy_id": 7,
+      "parent_id": "FFSMKA6x0Sx2fmrL-m3C-38"
+    },
+    {
+      "child_id": "FFSMKA6x0Sx2fmrL-m3C-4",
+      "hierarchy_id": 8,
+      "parent_id": "FFSMKA6x0Sx2fmrL-m3C-38"
+    },
+    {
+      "child_id": "FFSMKA6x0Sx2fmrL-m3C-5",
+      "hierarchy_id": 9,
+      "parent_id": "FFSMKA6x0Sx2fmrL-m3C-38"
+    },
+    {
+      "child_id": "n4nqFmEmNr8UNFELIVMs-1",
+      "hierarchy_id": 10,
+      "parent_id": "FFSMKA6x0Sx2fmrL-m3C-38"
+    },
+    {
+      "child_id": "n4nqFmEmNr8UNFELIVMs-5",
+      "hierarchy_id": 11,
+      "parent_id": "FFSMKA6x0Sx2fmrL-m3C-38"
+    }
+  ],
+  "requests": [
+    {
+      "component_source_id": "n4nqFmEmNr8UNFELIVMs-2",
+      "component_target_id": "n4nqFmEmNr8UNFELIVMs-1",
+      "description": "Использует",
+      "request_id": 1
+    },
+    {
+      "component_source_id": "n4nqFmEmNr8UNFELIVMs-4",
+      "component_target_id": "n4nqFmEmNr8UNFELIVMs-5",
+      "description": "Использует",
+      "request_id": 2
+    },
+    {
+      "component_source_id": "FFSMKA6x0Sx2fmrL-m3C-1",
+      "component_target_id": "FFSMKA6x0Sx2fmrL-m3C-5",
+      "description": "API",
+      "request_id": 3
+    },
+    {
+      "component_source_id": "FFSMKA6x0Sx2fmrL-m3C-2",
+      "component_target_id": "FFSMKA6x0Sx2fmrL-m3C-5",
+      "description": "API",
+      "request_id": 4
+    },
+    {
+      "component_source_id": "FFSMKA6x0Sx2fmrL-m3C-3",
+      "component_target_id": "FFSMKA6x0Sx2fmrL-m3C-5",
+      "description": "API",
+      "request_id": 5
+    },
+    {
+      "component_source_id": "FFSMKA6x0Sx2fmrL-m3C-4",
+      "component_target_id": "FFSMKA6x0Sx2fmrL-m3C-5",
+      "description": "API",
+      "request_id": 6
+    },
+    {
+      "component_source_id": "n4nqFmEmNr8UNFELIVMs-1",
+      "component_target_id": "FFSMKA6x0Sx2fmrL-m3C-1",
+      "description": "API",
+      "request_id": 7
+    },
+    {
+      "component_source_id": "n4nqFmEmNr8UNFELIVMs-1",
+      "component_target_id": "FFSMKA6x0Sx2fmrL-m3C-2",
+      "description": "API",
+      "request_id": 8
+    },
+    {
+      "component_source_id": "n4nqFmEmNr8UNFELIVMs-5",
+      "component_target_id": "FFSMKA6x0Sx2fmrL-m3C-2",
+      "description": "API",
+      "request_id": 9
+    },
+    {
+      "component_source_id": "n4nqFmEmNr8UNFELIVMs-5",
+      "component_target_id": "FFSMKA6x0Sx2fmrL-m3C-3",
+      "description": "API",
+      "request_id": 10
+    },
+    {
+      "component_source_id": "n4nqFmEmNr8UNFELIVMs-5",
+      "component_target_id": "FFSMKA6x0Sx2fmrL-m3C-4",
+      "description": "API",
+      "request_id": 11
+    },
+    {
+      "component_source_id": "FFSMKA6x0Sx2fmrL-m3C-4",
+      "component_target_id": "FFSMKA6x0Sx2fmrL-m3C-20",
+      "description": "External API",
+      "request_id": 12
+    },
+    {
+      "component_source_id": "FFSMKA6x0Sx2fmrL-m3C-26",
+      "component_target_id": "FFSMKA6x0Sx2fmrL-m3C-22",
+      "description": "External API",
+      "request_id": 13
+    },
+    {
+      "component_source_id": "FFSMKA6x0Sx2fmrL-m3C-3",
+      "component_target_id": "FFSMKA6x0Sx2fmrL-m3C-26",
+      "description": "API",
+      "request_id": 14
+    },
+    {
+      "component_source_id": "FFSMKA6x0Sx2fmrL-m3C-26",
+      "component_target_id": "FFSMKA6x0Sx2fmrL-m3C-24",
+      "description": "GitLab API",
+      "request_id": 15
+    },
+    {
+      "component_source_id": "n4nqFmEmNr8UNFELIVMs-5",
+      "component_target_id": "FFSMKA6x0Sx2fmrL-m3C-28",
+      "description": "HTTPS",
+      "request_id": 16
+    },
+    {
+      "component_source_id": "FFSMKA6x0Sx2fmrL-m3C-3",
+      "component_target_id": "FFSMKA6x0Sx2fmrL-m3C-30",
+      "description": "API",
+      "request_id": 17
+    },
+    {
+      "component_source_id": "FFSMKA6x0Sx2fmrL-m3C-4",
+      "component_target_id": "FFSMKA6x0Sx2fmrL-m3C-32",
+      "description": "API",
+      "request_id": 18
+    },
+    {
+      "component_source_id": "FFSMKA6x0Sx2fmrL-m3C-35",
+      "component_target_id": "FFSMKA6x0Sx2fmrL-m3C-5",
+      "description": "API",
+      "request_id": 19
+    }
+  ],
+  "success": true
+}

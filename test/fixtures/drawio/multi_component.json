@@ -1,14 +1,38 @@
 {
-  "success": true,
   "components": [
-    {"id": "user", "code": "user", "name": "User", "c4_type": "Person"},
-    {"id": "app", "code": "app", "name": "Web App", "c4_type": "SoftwareSystem"},
-    {"id": "db", "code": "db", "name": "Database", "c4_type": "Container"}
+    {
+      "c4_type": "SoftwareSystem",
+      "code": "Iw754acdi1yUz5WTydqZ-1",
+      "id": "Iw754acdi1yUz5WTydqZ-1",
+      "name": "name"
+    },
+    {
+      "c4_type": "Database",
+      "code": "Iw754acdi1yUz5WTydqZ-2",
+      "id": "Iw754acdi1yUz5WTydqZ-2",
+      "name": "Description"
+    },
+    {
+      "c4_type": "body",
+      "code": "Iw754acdi1yUz5WTydqZ-4",
+      "id": "Iw754acdi1yUz5WTydqZ-4",
+      "name": "name"
+    }
   ],
-  "requests": [],
-  "parent_child": [
-    {"parent_id": "db", "child_id": "app"},
-    {"parent_id": "app", "child_id": "db"},
-    {"parent_id": "app", "child_id": "user"}
-  ]
+  "parent_child": [],
+  "requests": [
+    {
+      "component_source_id": "Iw754acdi1yUz5WTydqZ-4",
+      "component_target_id": "Iw754acdi1yUz5WTydqZ-1",
+      "description": "Call system",
+      "request_id": 1
+    },
+    {
+      "component_source_id": "Iw754acdi1yUz5WTydqZ-1",
+      "component_target_id": "Iw754acdi1yUz5WTydqZ-2",
+      "description": "Call database",
+      "request_id": 2
+    }
+  ],
+  "success": true
 }

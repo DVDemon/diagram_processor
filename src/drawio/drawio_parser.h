@@ -4,11 +4,13 @@
 #include <Poco/JSON/Array.h>
 #include <Poco/JSON/Stringifier.h>
 #include <Poco/Base64Decoder.h>
+#include <Poco/StreamCopier.h>
 
 #include <algorithm>
 #include <cmath>
 #include <map>
 #include <regex>
+#include <set>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -106,14 +108,14 @@ private:
             std::istringstream is(b64);
             Poco::Base64Decoder dec(is);
             std::ostringstream os;
-            char buf[4096];
-            while (dec.read(buf, sizeof(buf)) && dec.gcount() > 0) {
-                os.write(buf, dec.gcount());
-            }
+            Poco::StreamCopier::copyStream(dec, os);
             std::string compressed = os.str();
             std::vector<unsigned char> compressedVec(compressed.begin(), compressed.end());
 
-            std::vector<unsigned char> out(compressed.size() * 4);
+            // Decompressed size can be much larger than compressed; use generous buffer
+            size_t outCapacity = compressed.size() * 64;
+            if (outCapacity < 131072) outCapacity = 131072;
+            std::vector<unsigned char> out(outCapacity);
             z_stream strm = {};
             strm.zalloc = Z_NULL;
             strm.zfree = Z_NULL;
@@ -125,9 +127,9 @@ private:
 
             strm.avail_out = static_cast<uInt>(out.size());
             strm.next_out = out.data();
-
-            inflate(&strm, Z_FINISH);
+            int ret = inflate(&strm, Z_FINISH);
             inflateEnd(&strm);
+            if (ret != Z_STREAM_END && ret != Z_OK) return "";
 
             decoded.assign(reinterpret_cast<char*>(out.data()), strm.total_out);
 
@@ -191,7 +193,8 @@ private:
             if (c4Type == "Relationship") {
                 std::string mxCellBlock = findTagContent(objBlock, "mxCell");
                 if (mxCellBlock.empty()) mxCellBlock = objBlock;
-                auto cellAttrs = parseAttrsStatic(extractAttrsFromTag(mxCellBlock, "mxCell"));
+                // source/target are in the inner mxCell, not in object; use objBlock to find mxCell
+                auto cellAttrs = parseAttrsStatic(extractAttrsFromTag(objBlock, "mxCell"));
                 std::string src = getAttr(cellAttrs, "source");
                 std::string tgt = getAttr(cellAttrs, "target");
 
@@ -385,9 +388,13 @@ private:
     static std::vector<Relation> fixMissingRelations(const std::map<std::string, Component>& components,
                                                      const std::vector<Relation>& relations) {
         std::vector<Relation> out;
+        std::set<std::pair<std::string, std::string>> seen;
         for (const auto& r : relations) {
-            if (components.count(r.source) && components.count(r.target))
-                out.push_back(r);
+            if (!components.count(r.source) || !components.count(r.target)) continue;
+            auto key = std::make_pair(r.source, r.target);
+            if (seen.count(key)) continue;
+            seen.insert(key);
+            out.push_back(r);
         }
         return out;
     }
@@ -452,12 +459,10 @@ private:
     }
 
     static std::string extractAttrsFromTag(const std::string& block, const std::string& tag) {
-        std::regex re("<" + tag + R"(\s+[^>/]*(?:>|/))", std::regex::icase);
+        std::regex re("<" + tag + R"(\s+([^>/]*)(?:>|/))", std::regex::icase);
         std::smatch m;
         if (std::regex_search(block, m, re)) {
             std::string a = m[1].str();
-            if (a.back() == '/') a.pop_back();
-            if (a.back() == '>') a.pop_back();
             return a;
         }
         return "";

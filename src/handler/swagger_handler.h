@@ -31,7 +31,7 @@ paths:
           application/json:
             schema:
               type: object
-              required: [text]
+              description: One of text, prompt or message is required
               properties:
                 text:
                   type: string
@@ -62,7 +62,7 @@ paths:
                 result: "Я AI-ассистент..."
                 success: true
         '400':
-          description: Invalid request (missing text, invalid JSON)
+          description: Invalid request (missing text/prompt/message, empty body, invalid JSON)
         '502':
           description: AI API error
         '503':
@@ -155,7 +155,7 @@ paths:
   /api/v1/parse_plantuml_sequence:
     post:
       summary: Parse PlantUML Sequence diagram
-      description: Разбор PlantUML Sequence диаграммы. Извлекает participants/actors и их взаимодействия.
+      description: Разбор PlantUML Sequence диаграммы. Извлекает participants/actors и их взаимодействия. JSON с полем text, plantuml или content. Либо raw PlantUML в body.
       operationId: postParsePlantumlSequence
       requestBody:
         required: true
@@ -163,11 +163,17 @@ paths:
           application/json:
             schema:
               type: object
-              required: [text]
+              description: One of text, plantuml or content is required
               properties:
                 text:
                   type: string
                   description: PlantUML Sequence diagram source
+                plantuml:
+                  type: string
+                  description: Alternative field for diagram source
+                content:
+                  type: string
+                  description: Alternative field for diagram source
             example:
               text: |
                 @startuml
@@ -221,7 +227,7 @@ paths:
   /api/v1/parse_plantuml_c4:
     post:
       summary: Parse PlantUML C4 diagram
-      description: Разбор PlantUML C4 диаграммы (rectangle, C4-PlantUML Person/System/Rel).
+      description: Разбор PlantUML C4 диаграммы (rectangle, C4-PlantUML Person/System/Rel). JSON с полем text, plantuml или content. Либо raw PlantUML в body.
       operationId: postParsePlantumlC4
       requestBody:
         required: true
@@ -229,11 +235,17 @@ paths:
           application/json:
             schema:
               type: object
-              required: [text]
+              description: One of text, plantuml or content is required
               properties:
                 text:
                   type: string
                   description: PlantUML C4 diagram source
+                plantuml:
+                  type: string
+                  description: Alternative field for diagram source
+                content:
+                  type: string
+                  description: Alternative field for diagram source
             example:
               text: |
                 @startuml
@@ -295,9 +307,9 @@ paths:
     post:
       summary: Parse DrawIO C4 diagram
       description: |
-        Разбор DrawIO C4 диаграммы. Принимает JSON с полем text, xml, content или drawio.
-        Имена компонентов берутся из c4Name, при отсутствии — из c4Description.
-        Поддерживает сжатый и несжатый формат XML.
+        Разбор DrawIO C4 диаграммы. JSON с полем text, xml, content или drawio (XML диаграммы).
+        Либо raw XML в body. source/target связей должны быть в атрибутах внутреннего mxCell.
+        Поддерживает сжатый (base64+zlib) и несжатый формат XML.
       operationId: postParseDrawio
       requestBody:
         required: true
@@ -305,6 +317,7 @@ paths:
           application/json:
             schema:
               type: object
+              description: One of text, xml, content or drawio is required
               properties:
                 text:
                   type: string
@@ -329,8 +342,8 @@ paths:
                 <object id="sys2" c4Name="Платёжная система" c4Type="SoftwareSystem">
                   <mxCell parent="1"/><mxGeometry x="200" y="40" width="120" height="60" as="geometry"/>
                 </object>
-                <object id="rel1" c4Type="Relationship" c4Description="Запрос на оплату" c4Technology="REST" source="sys1" target="sys2">
-                  <mxCell parent="1"/>
+                <object id="rel1" c4Type="Relationship" c4Description="Запрос на оплату">
+                  <mxCell parent="1" source="sys1" target="sys2"/>
                 </object>
                 </root></mxGraphModel></diagram></mxfile>
       responses:
