@@ -1,0 +1,42 @@
+@startuml
+actor "Customer" as User
+participant "API Gateway" as Gateway
+participant "Auth Service" as AuthService
+participant "Order Service" as OrderService
+participant "Payment Service" as PaymentService
+participant "Inventory Service" as InventoryService
+participant "Notification Service" as NotificationService
+
+partition "Authentication" {
+    User -> Gateway : Login request
+    Gateway -> AuthService : Validate credentials
+    AuthService --> Gateway : JWT token
+    Gateway --> User : Session established
+}
+
+partition "Order Processing" {
+    User -> Gateway : Create order
+    Gateway -> OrderService : Submit order
+    OrderService -> InventoryService : Reserve items
+    InventoryService --> OrderService : Reserved
+    OrderService -> PaymentService : Charge payment
+    PaymentService --> OrderService : Payment confirmed
+    OrderService --> Gateway : Order created
+    Gateway ->> NotificationService : Send confirmation (async)
+    Gateway --> User : Order ID
+}
+
+loop "Retry on failure" {
+    OrderService ->> PaymentService : Retry payment (async)
+    PaymentService -->> OrderService : ACK
+}
+
+alt "Payment success" {
+    PaymentService -> NotificationService : Notify success
+    NotificationService --> PaymentService : Sent
+} else "Payment failed" {
+    PaymentService -> OrderService : Rollback
+    OrderService --> PaymentService : Rolled back
+}
+
+@enduml

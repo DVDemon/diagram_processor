@@ -147,7 +147,8 @@ INSTANTIATE_TEST_SUITE_P(
     PlantUmlSequenceTest,
     ::testing::Values(
         std::make_pair("simple_sequence", "simple_sequence"),
-        std::make_pair("arrows_only", "arrows_only")
+        std::make_pair("arrows_only", "arrows_only"),
+        std::make_pair("large_sequence", "large_sequence")
     )
 );
 

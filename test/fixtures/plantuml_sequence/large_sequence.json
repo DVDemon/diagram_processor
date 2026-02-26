@@ -1,0 +1,33 @@
+{
+  "success": true,
+  "components": [
+    {"id": "User", "code": "User", "name": "Customer"},
+    {"id": "Gateway", "code": "Gateway", "name": "API Gateway"},
+    {"id": "AuthService", "code": "AuthService", "name": "Auth Service"},
+    {"id": "OrderService", "code": "OrderService", "name": "Order Service"},
+    {"id": "PaymentService", "code": "PaymentService", "name": "Payment Service"},
+    {"id": "InventoryService", "code": "InventoryService", "name": "Inventory Service"},
+    {"id": "NotificationService", "code": "NotificationService", "name": "Notification Service"}
+  ],
+  "requests": [
+    {"request_id": 1, "component_source_id": "User", "component_target_id": "Gateway", "description": "Login request"},
+    {"request_id": 2, "component_source_id": "Gateway", "component_target_id": "AuthService", "description": "Validate credentials"},
+    {"request_id": 3, "component_source_id": "AuthService", "component_target_id": "Gateway", "description": "JWT token"},
+    {"request_id": 4, "component_source_id": "Gateway", "component_target_id": "User", "description": "Session established"},
+    {"request_id": 5, "component_source_id": "User", "component_target_id": "Gateway", "description": "Create order"},
+    {"request_id": 6, "component_source_id": "Gateway", "component_target_id": "OrderService", "description": "Submit order"},
+    {"request_id": 7, "component_source_id": "OrderService", "component_target_id": "InventoryService", "description": "Reserve items"},
+    {"request_id": 8, "component_source_id": "InventoryService", "component_target_id": "OrderService", "description": "Reserved"},
+    {"request_id": 9, "component_source_id": "OrderService", "component_target_id": "PaymentService", "description": "Charge payment"},
+    {"request_id": 10, "component_source_id": "PaymentService", "component_target_id": "OrderService", "description": "Payment confirmed"},
+    {"request_id": 11, "component_source_id": "OrderService", "component_target_id": "Gateway", "description": "Order created"},
+    {"request_id": 12, "component_source_id": "Gateway", "component_target_id": "NotificationService", "description": "Send confirmation (async)"},
+    {"request_id": 13, "component_source_id": "Gateway", "component_target_id": "User", "description": "Order ID"},
+    {"request_id": 14, "component_source_id": "OrderService", "component_target_id": "PaymentService", "description": "Retry payment (async)"},
+    {"request_id": 15, "component_source_id": "PaymentService", "component_target_id": "OrderService", "description": "ACK"},
+    {"request_id": 16, "component_source_id": "PaymentService", "component_target_id": "NotificationService", "description": "Notify success"},
+    {"request_id": 17, "component_source_id": "NotificationService", "component_target_id": "PaymentService", "description": "Sent"},
+    {"request_id": 18, "component_source_id": "PaymentService", "component_target_id": "OrderService", "description": "Rollback"},
+    {"request_id": 19, "component_source_id": "OrderService", "component_target_id": "PaymentService", "description": "Rolled back"}
+  ]
+}

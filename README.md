@@ -1,6 +1,60 @@
 # Diagram Processing Server
 
-REST сервер на C++ с использованием библиотеки POCO.
+REST-сервер на C++ (POCO) для разбора архитектурных диаграмм и интеграции с AI и Confluence.
+
+## Описание системы
+
+Сервер предоставляет единый API для:
+
+- **Парсинг диаграмм** — извлечение компонентов и связей из PlantUML (Sequence, C4) и DrawIO (C4). Результат в формате JSON: `components`, `requests`, `parent_child`.
+- **AI-обработка** — отправка текста в DeepSeek/OpenAI и получение ответа.
+- **Confluence** — загрузка страниц и извлечение встроенных PlantUML/DrawIO диаграмм из HTML.
+- **Метрики** — Prometheus-совместимые метрики и OpenAPI-спецификация (Swagger).
+
+Парсеры поддерживают синхронные/асинхронные взаимодействия, partition, loop, ветвления. JSON-результат можно конвертировать в DOT (Graphviz) для визуализации.
+
+## Структура каталогов
+
+```
+poco_ai_server/
+├── src/
+│   ├── main.cpp                 # Точка входа, HTTP-сервер
+│   ├── handler/                 # HTTP-обработчики
+│   │   ├── router_factory.h     # Маршрутизация запросов
+│   │   ├── parse_plantuml_sequence_handler.h
+│   │   ├── parse_plantuml_c4_handler.h
+│   │   ├── parse_drawio_handler.h
+│   │   ├── parse_confluence_handler.h
+│   │   ├── load_confluence_handler.h
+│   │   ├── process_with_ai_handler.h
+│   │   ├── swagger_handler.h
+│   │   └── metrics_handler.h
+│   ├── plantuml/                # Парсеры PlantUML
+│   │   ├── plantuml_sequence.h
+│   │   └── plantuml_c4.h
+│   ├── drawio/                  # Парсер DrawIO C4
+│   │   └── drawio_parser.h
+│   ├── confluence/              # Confluence API и парсер HTML
+│   │   ├── confluence_client.h
+│   │   └── confluence_parser.h
+│   └── openai/                  # Клиент OpenAI/DeepSeek API
+│       └── openai_client.h
+├── test/
+│   ├── parser_test.cpp         # Unit-тесты парсеров (Google Test)
+│   └── fixtures/                # Тестовые данные
+│       ├── plantuml_sequence/   # .puml + .json
+│       ├── plantuml_c4/
+│       ├── drawio/
+│       └── confluence/
+├── scripts/
+│   └── json2dot.py              # Конвертация JSON → DOT (Graphviz)
+├── postman/                     # Postman-коллекция для API
+├── CMakeLists.txt
+├── Dockerfile
+├── Dockerfile.test
+├── docker-compose.yaml
+└── .env_example
+```
 
 ## Endpoints
 
