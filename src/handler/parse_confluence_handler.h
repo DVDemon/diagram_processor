@@ -17,6 +17,8 @@
 #include <set>
 #include <sstream>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace handlers {
 
@@ -54,63 +56,49 @@ public:
             }
 
             confluence::ConfluenceClient client;
-            std::string html = (includeSubpages == "1" || includeSubpages == "true")
-                ? client.getPageBodyWithIncludes(pageId)
-                : client.getPageBodyById(pageId);
+            bool useIncludes = (includeSubpages == "1" || includeSubpages == "true");
+            std::vector<std::pair<std::string, confluence::Diagram>> diagramRows;
+            std::set<std::string> resolvedKeys;
 
-            if (html.empty()) {
-                response.setStatus(Poco::Net::HTTPResponse::HTTP_BAD_GATEWAY);
-                std::ostream& ostr = response.send();
-                ostr << R"({"error":"Failed to load page content"})";
-                if (g_httpErrors) g_httpErrors->inc();
-                logDuration(start, request, 502, logger);
-                return;
-            }
-
-            auto diagrams = confluence::ConfluenceParser::parse(html);
-            bool includeChildPages = (includeSubpages == "1" || includeSubpages == "true");
-            std::set<std::string> resolvedNames;
-
-            for (auto& d : diagrams) {
-                if (d.format == confluence::DiagramFormat::DrawIO && d.subtype == "attachment" &&
-                    d.text.size() > 15 && d.text.substr(0, 15) == "<!-- DrawIO: ") {
-                    size_t end = d.text.find(" (attachment)");
-                    if (end != std::string::npos) {
-                        std::string diagramName = d.text.substr(15, end - 15);
-                        std::string xml = client.getDrawioXmlFromAttachment(pageId, diagramName, includeChildPages);
-                        if (!xml.empty()) {
-                            d.text = xml;
-                            d.subtype = confluence::ConfluenceParser::detectDrawIOTypePublic(xml);
-                            resolvedNames.insert(normalizeDiagramName(diagramName));
-                        }
-                    }
+            if (useIncludes) {
+                confluence::LoadedConfluencePage tree = client.loadPageSubtree(pageId, true);
+                std::string rootHtml = confluence::ConfluenceClient::storageHtmlFromPageJson(tree.pageJson);
+                if (rootHtml.empty()) {
+                    response.setStatus(Poco::Net::HTTPResponse::HTTP_BAD_GATEWAY);
+                    std::ostream& ostr = response.send();
+                    ostr << R"({"error":"Failed to load page content"})";
+                    if (g_httpErrors) g_httpErrors->inc();
+                    logDuration(start, request, 502, logger);
+                    return;
                 }
-            }
-
-            auto discovered = client.getDrawioAttachmentsByContent(pageId, includeChildPages);
-            for (const auto& p : discovered) {
-                if (resolvedNames.count(normalizeDiagramName(p.first)) == 0) {
-                    confluence::Diagram d;
-                    d.text = p.second;
-                    d.format = confluence::DiagramFormat::DrawIO;
-                    d.subtype = confluence::ConfluenceParser::detectDrawIOTypePublic(p.second);
-                    d.sectionTitle = p.first;
-                    diagrams.push_back(d);
+                appendDiagramsFromPageTree(tree, client, diagramRows, resolvedKeys);
+            } else {
+                std::string html = client.getPageBodyById(pageId);
+                if (html.empty()) {
+                    response.setStatus(Poco::Net::HTTPResponse::HTTP_BAD_GATEWAY);
+                    std::ostream& ostr = response.send();
+                    ostr << R"({"error":"Failed to load page content"})";
+                    if (g_httpErrors) g_httpErrors->inc();
+                    logDuration(start, request, 502, logger);
+                    return;
                 }
+                appendDiagramsForPage(pageId, html, client, diagramRows, resolvedKeys, false);
             }
 
             Poco::JSON::Object root;
             Poco::JSON::Array arr;
-            for (const auto& d : diagrams) {
+            for (const auto& row : diagramRows) {
+                const confluence::Diagram& d = row.second;
                 Poco::JSON::Object obj;
                 obj.set("text", d.text);
                 obj.set("format", d.format == confluence::DiagramFormat::PlantUML ? "plantuml" : "drawio");
                 obj.set("subtype", d.subtype);
                 obj.set("sectionTitle", d.sectionTitle);
+                obj.set("source_page_id", row.first);
                 arr.add(obj);
             }
             root.set("diagrams", arr);
-            root.set("count", static_cast<int>(diagrams.size()));
+            root.set("count", static_cast<int>(diagramRows.size()));
 
             std::stringstream ss;
             Poco::JSON::Stringifier::stringify(root, ss);
@@ -148,6 +136,65 @@ public:
     }
 
 private:
+    static void appendDiagramsForPage(const std::string& sourcePageId,
+                                      const std::string& html,
+                                      confluence::ConfluenceClient& client,
+                                      std::vector<std::pair<std::string, confluence::Diagram>>& out,
+                                      std::set<std::string>& resolvedKeys,
+                                      bool searchDescendantsForAttachments) {
+        auto diagrams = confluence::ConfluenceParser::parse(html);
+
+        for (auto& d : diagrams) {
+            if (d.format == confluence::DiagramFormat::DrawIO && d.subtype == "attachment" &&
+                d.text.size() > 15 && d.text.substr(0, 15) == "<!-- DrawIO: ") {
+                size_t end = d.text.find(" (attachment)");
+                if (end != std::string::npos) {
+                    std::string diagramName = d.text.substr(15, end - 15);
+                    std::string xml = client.getDrawioXmlFromAttachment(sourcePageId, diagramName,
+                                                                        searchDescendantsForAttachments);
+                    if (!xml.empty()) {
+                        d.text = xml;
+                        d.subtype = confluence::ConfluenceParser::detectDrawIOTypePublic(xml);
+                        resolvedKeys.insert(sourcePageId + "|" + normalizeDiagramName(diagramName));
+                    }
+                }
+            }
+        }
+
+        for (auto& d : diagrams) {
+            out.emplace_back(sourcePageId, std::move(d));
+        }
+
+        auto discovered = client.getDrawioAttachmentsByContent(sourcePageId, searchDescendantsForAttachments);
+        for (const auto& p : discovered) {
+            std::string key = sourcePageId + "|" + normalizeDiagramName(p.first);
+            if (resolvedKeys.count(key) == 0) {
+                confluence::Diagram d;
+                d.text = p.second;
+                d.format = confluence::DiagramFormat::DrawIO;
+                d.subtype = confluence::ConfluenceParser::detectDrawIOTypePublic(p.second);
+                d.sectionTitle = p.first;
+                out.emplace_back(sourcePageId, std::move(d));
+                resolvedKeys.insert(std::move(key));
+            }
+        }
+    }
+
+    static void appendDiagramsFromPageTree(const confluence::LoadedConfluencePage& node,
+                                           confluence::ConfluenceClient& client,
+                                           std::vector<std::pair<std::string, confluence::Diagram>>& out,
+                                           std::set<std::string>& resolvedKeys) {
+        if (!node.circularSkip) {
+            std::string html = confluence::ConfluenceClient::storageHtmlFromPageJson(node.pageJson);
+            if (!html.empty()) {
+                appendDiagramsForPage(node.pageId, html, client, out, resolvedKeys, false);
+            }
+        }
+        for (const auto& ch : node.children) {
+            appendDiagramsFromPageTree(*ch, client, out, resolvedKeys);
+        }
+    }
+
     static std::string normalizeDiagramName(std::string s) {
         for (char& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
         if (s.size() >= 7 && s.substr(s.size() - 7) == ".drawio") s = s.substr(0, s.size() - 7);

@@ -45,6 +45,8 @@ target_link_libraries(parser_tests
         GTest::gtest_main
         Poco::Foundation
         Poco::JSON
+        Poco::Net
+        Poco::NetSSL
         ZLIB::ZLIB
 )
 add_test(NAME ParserTests COMMAND parser_tests)

@@ -15,6 +15,7 @@
 #include <Poco/JSON/Stringifier.h>
 
 #include <algorithm>
+#include <memory>
 #include <regex>
 #include <set>
 #include <sstream>
@@ -24,18 +25,30 @@
 
 namespace confluence {
 
+/** One node of a page tree: page JSON plus direct child pages (same loading rules as root). */
+struct LoadedConfluencePage {
+    std::string pageId;
+    std::string pageJson;
+    std::vector<std::unique_ptr<LoadedConfluencePage>> children;
+    bool circularSkip = false;
+};
+
 /**
- * Client for Confluence Cloud REST API v2.
- * Configuration via environment variables:
- *   CONFLUENCE_URL   - Base URL (e.g. https://mysite.atlassian.net or https://confluence.example.com)
- *   CONFLUENCE_USER  - Email for Basic auth (with CONFLUENCE_TOKEN as API token)
- *   CONFLUENCE_TOKEN - API token (Basic auth) or Bearer token (required)
- *   CONFLUENCE_API_TYPE - "cloud" (v2) or "server" (default: server for on-prem)
- *   CONFLUENCE_TIMEOUT - Timeout in seconds (default: 30)
- *   CONFLUENCE_SSL_VERIFY - "true" to verify SSL certs (default: true)
+ * Confluence REST client. Primary target: on-premises Confluence Server / Data Center (REST API v1
+ * under /rest/api). Optional: Confluence Cloud (REST API v2 under /wiki/api/v2) when
+ * CONFLUENCE_API_TYPE=cloud.
  *
- * Auth: If CONFLUENCE_USER is set, uses Basic auth (email:token)
- *       Otherwise uses Bearer token (Personal Access Token)
+ * Environment:
+ *   CONFLUENCE_URL   - Base URL without trailing slash. On-prem: https://confluence.company.local
+ *                      (or with context path, e.g. https://host/confluence). Cloud: https://tenant.atlassian.net
+ *   CONFLUENCE_USER  - For Basic auth (username; often still email on Cloud)
+ *   CONFLUENCE_TOKEN - Personal Access Token / API token / password (with Basic auth)
+ *   CONFLUENCE_API_TYPE - server | onprem | datacenter | dc (default) = on-prem REST v1.
+ *                         cloud | v2 = Atlassian Cloud REST v2.
+ *   CONFLUENCE_TIMEOUT - Seconds (default: 30)
+ *   CONFLUENCE_SSL_VERIFY - true/false (default: true)
+ *
+ * Auth: CONFLUENCE_USER set -> Basic auth (user:token). Else Bearer CONFLUENCE_TOKEN.
  */
 class ConfluenceClient {
 public:
@@ -81,8 +94,8 @@ public:
      */
     std::string getChildPages(const std::string& pageId) const {
         std::string path = apiType_ == ApiType::Cloud
-            ? "/wiki/api/v2/pages/" + pageId + "/children"
-            : "/rest/api/content/" + pageId + "/child?expand=page";
+            ? "/wiki/api/v2/pages/" + pageId + "/children?limit=250"
+            : "/rest/api/content/" + pageId + "/child/page?limit=100&expand=page";
         return doGet(path);
     }
 
@@ -116,6 +129,11 @@ public:
         return extractBodyFromPageJson(json);
     }
 
+    /** Storage HTML from a page JSON payload (same shape as getPageById / getPageWithIncludes). */
+    static std::string storageHtmlFromPageJson(const std::string& pageJson) {
+        return extractBodyFromPageJson(pageJson);
+    }
+
     /**
      * Get page body HTML with resolved includes (for parsing).
      * @param pageId Confluence page ID
@@ -124,6 +142,17 @@ public:
     std::string getPageBodyWithIncludes(const std::string& pageId) const {
         std::string json = getPageWithIncludes(pageId);
         return extractBodyFromPageJson(json);
+    }
+
+    /**
+     * Load a page and all descendant pages in the hierarchy (direct children, recursively).
+     * For each page: same as getPageById / getPageWithIncludes (when resolveIncludes is true).
+     * Order: resolve includes on a page, then load each child with the same algorithm.
+     * Protects against cycles in the page tree (skipped nodes have circularSkip set).
+     */
+    LoadedConfluencePage loadPageSubtree(const std::string& pageId, bool resolveIncludes) const {
+        std::set<std::string> visited;
+        return loadPageSubtreeImpl(pageId, resolveIncludes, visited);
     }
 
     /**
@@ -229,11 +258,7 @@ public:
             if (seen.count(pid)) continue;
             seen.insert(pid);
             try {
-                std::string childPath = apiType_ == ApiType::Cloud
-                    ? "/wiki/api/v2/pages/" + pid + "/children"
-                    : "/rest/api/content/" + pid + "/child?expand=page";
-                std::string childJson = doGet(childPath);
-                std::vector<std::string> childIds = extractChildPageIds(childJson);
+                std::vector<std::string> childIds = fetchAllDirectChildPageIds(pid);
                 for (const auto& cid : childIds) {
                     if (seen.count(cid) == 0) {
                         ids.push_back(cid);
@@ -255,7 +280,17 @@ public:
             auto results = obj->getArray("results");
             for (size_t i = 0; i < results->size(); ++i) {
                 auto item = results->getObject(i);
-                if (item->has("id")) ids.push_back(item->getValue<std::string>("id"));
+                std::string id;
+                if (item->has("id")) {
+                    id = item->getValue<std::string>("id");
+                } else if (item->has("page")) {
+                    auto page = item->getObject("page");
+                    if (page->has("id")) id = page->getValue<std::string>("id");
+                } else if (item->has("content")) {
+                    auto content = item->getObject("content");
+                    if (content->has("id")) id = content->getValue<std::string>("id");
+                }
+                if (!id.empty()) ids.push_back(id);
             }
         } catch (...) {}
         return ids;
@@ -265,6 +300,75 @@ public:
     int getTimeoutSec() const { return timeoutSec_; }
 
 private:
+    /** Pagination _links.next (Confluence Cloud REST API v2 children responses). */
+    static std::string extractCloudChildrenNextPath(const std::string& jsonStr) {
+        try {
+            Poco::JSON::Parser parser;
+            auto obj = parser.parse(jsonStr).extract<Poco::JSON::Object::Ptr>();
+            if (!obj->has("_links")) return "";
+            auto links = obj->getObject("_links");
+            if (!links->has("next")) return "";
+            std::string next = links->getValue<std::string>("next");
+            if (next.empty() || next[0] != '/') return "";
+            return next;
+        } catch (...) {
+            return "";
+        }
+    }
+
+    std::vector<std::string> fetchAllDirectChildPageIds(const std::string& pageId) const {
+        std::vector<std::string> all;
+        if (apiType_ == ApiType::Cloud) {
+            std::string nextPath = "/wiki/api/v2/pages/" + pageId + "/children?limit=250";
+            for (int i = 0; i < 1000; ++i) {
+                std::string json = doGet(nextPath);
+                std::vector<std::string> batch = extractChildPageIds(json);
+                all.insert(all.end(), batch.begin(), batch.end());
+                nextPath = extractCloudChildrenNextPath(json);
+                if (nextPath.empty()) break;
+            }
+        } else {
+            const int limit = 100;
+            for (int start = 0, iter = 0; iter < 1000; ++iter) {
+                std::string path = "/rest/api/content/" + pageId + "/child/page?limit=" + std::to_string(limit) +
+                    "&start=" + std::to_string(start) + "&expand=page";
+                std::string json = doGet(path);
+                std::vector<std::string> batch = extractChildPageIds(json);
+                if (batch.empty()) break;
+                all.insert(all.end(), batch.begin(), batch.end());
+                if (batch.size() < static_cast<size_t>(limit)) break;
+                start += limit;
+            }
+        }
+        return all;
+    }
+
+    LoadedConfluencePage loadPageSubtreeImpl(const std::string& pageId, bool resolveIncludes,
+                                            std::set<std::string>& visited) const {
+        if (visited.count(pageId)) {
+            LoadedConfluencePage dup;
+            dup.pageId = pageId;
+            dup.circularSkip = true;
+            return dup;
+        }
+        visited.insert(pageId);
+
+        std::string json = resolveIncludes ? getPageWithIncludes(pageId) : getPageById(pageId);
+        LoadedConfluencePage node;
+        node.pageId = pageId;
+        node.pageJson = json;
+
+        try {
+            std::vector<std::string> childIds = fetchAllDirectChildPageIds(pageId);
+            for (const auto& cid : childIds) {
+                node.children.push_back(
+                    std::make_unique<LoadedConfluencePage>(loadPageSubtreeImpl(cid, resolveIncludes, visited)));
+            }
+        } catch (...) {}
+
+        return node;
+    }
+
     static std::string normalizeUrl(const std::string& url) {
         if (url.empty()) return "";
         std::string result = url;
@@ -281,7 +385,15 @@ private:
         for (char c : s) {
             lower += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
         }
-        return (lower == "cloud" || lower == "v2") ? ApiType::Cloud : ApiType::Server;
+        while (!lower.empty() && (lower.front() == ' ' || lower.front() == '\t')) lower.erase(0, 1);
+        while (!lower.empty() && (lower.back() == ' ' || lower.back() == '\t')) lower.pop_back();
+        std::string compact;
+        for (char c : lower) {
+            if (c != '-' && c != '_') compact += c;
+        }
+        if (compact == "cloud" || compact == "v2") return ApiType::Cloud;
+        // server, onprem, datacenter, dc, empty, unknown -> Confluence Server / Data Center (on-prem)
+        return ApiType::Server;
     }
 
     static bool parseBool(const std::string& s) {
@@ -586,10 +698,14 @@ private:
         if (fullPath.empty() || fullPath[0] != '/') {
             fullPath = "/" + fullPath;
         }
-        if (!baseUri.getPath().empty() && baseUri.getPath() != "/") {
-            std::string basePath = baseUri.getPath();
+        // On-premises installs often use a context path (e.g. https://host/confluence). Prepend it when the
+        // request path does not already start with that prefix. Plain https://host uses empty path — no change.
+        std::string basePath = baseUri.getPath();
+        if (!basePath.empty() && basePath != "/") {
             if (basePath.back() == '/') basePath.pop_back();
-            fullPath = basePath + fullPath;
+            const bool alreadyPrefixed = (fullPath.size() >= basePath.size() &&
+                fullPath.compare(0, basePath.size(), basePath) == 0);
+            if (!alreadyPrefixed) fullPath = basePath + fullPath;
         }
 
         Poco::Net::Context::Ptr sslContext;

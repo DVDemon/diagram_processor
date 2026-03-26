@@ -77,10 +77,10 @@ poco_ai_server/
 - `OPENAI_SYSTEM_PROMPT` — системный промпт для AI
 - `OPENAI_TIMEOUT` — таймаут в секундах (по умолчанию: 60)
 - `OPENAI_SSL_VERIFY` — проверка SSL сертификатов: true/false (по умолчанию: false)
-- `CONFLUENCE_URL` — URL Confluence
-- `CONFLUENCE_USER` — email для Basic auth
-- `CONFLUENCE_TOKEN` — API токен или пароль
-- `CONFLUENCE_API_TYPE` — `server` (on-prem) или `cloud` (по умолчанию: server)
+- `CONFLUENCE_URL` — базовый URL Confluence без завершающего `/` (on-prem: `https://confluence.corp.local`, при установке в контексте — `https://host/confluence`)
+- `CONFLUENCE_USER` — логин для Basic auth (часто учётная запись с правами на страницы)
+- `CONFLUENCE_TOKEN` — Personal Access Token, API token или пароль (в зависимости от настроек DC)
+- `CONFLUENCE_API_TYPE` — по умолчанию **on-premises**: `server`, `onprem`, `datacenter` или `dc` — REST API v1 (`/rest/api`). Для **Atlassian Cloud** задайте `cloud` или `v2` (REST API v2, `/wiki/api/v2`)
 - `CONFLUENCE_TIMEOUT` — таймаут в секундах (по умолчанию: 30)
 - `CONFLUENCE_SSL_VERIFY` — проверка SSL: true/false (по умолчанию: false)
 

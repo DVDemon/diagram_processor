@@ -70,7 +70,7 @@ paths:
   /api/v1/load_confluence:
     get:
       summary: Load Confluence page
-      description: Load page from Confluence by page ID. With include_subpages=1, recursively resolves include macros (sub-pages).
+      description: Load page from Confluence by page ID. With include_subpages=1, resolves include macros, then recursively loads each direct child page (same rules on every level). Response includes a children array per node.
       operationId: getLoadConfluence
       parameters:
         - name: page_id
@@ -86,24 +86,38 @@ paths:
           schema:
             type: string
             enum: ["1", "true"]
-          description: If 1 or true, resolve ac:structured-macro include macros and embed sub-page content
+          description: If 1 or true, resolve include macros and recursively load child pages (each child loaded with includes then its own children)
       responses:
         '200':
-          description: Success, returns Confluence page JSON
+          description: Success — page_id, html, page; children is a nested array of the same shape when include_subpages=1 (empty array when include_subpages is off)
           content:
             application/json:
               schema:
                 type: object
+                properties:
+                  page_id:
+                    type: string
+                  html:
+                    type: string
+                    description: Confluence storage HTML (include macros resolved when include_subpages=1)
+                  page:
+                    type: object
+                    description: Raw Confluence REST API page JSON
+                  children:
+                    type: array
+                    description: Direct child pages (recursive structure), only populated when include_subpages=1
+                    items:
+                      type: object
         '400':
           description: Missing page_id parameter
         '502':
-          description: Confluence API error
+          description: Confluence API error or empty page body
         '503':
           description: Confluence not configured
   /api/v1/parse_confluence:
     get:
       summary: Parse Confluence page and extract diagrams
-      description: Load page (with optional subpages via include_subpages=1), parse content, return list of PlantUML and DrawIO diagrams.
+      description: Load page; with include_subpages=1, resolve includes and walk the child-page tree (same as load_confluence), collecting diagrams from every page in the tree.
       operationId: getParseConfluence
       parameters:
         - name: page_id
@@ -119,7 +133,7 @@ paths:
           schema:
             type: string
             enum: ["1", "true"]
-          description: If 1 or true, resolve include macros and embed sub-page content before parsing
+          description: If 1 or true, resolve includes and parse every page in the child hierarchy (recursive)
       responses:
         '200':
           description: Success, returns diagrams array
@@ -144,6 +158,9 @@ paths:
                           description: Diagram subtype (sequence, c4, component, etc.)
                         sectionTitle:
                           type: string
+                        source_page_id:
+                          type: string
+                          description: Confluence page ID the diagram was taken from
                   count:
                     type: integer
         '400':

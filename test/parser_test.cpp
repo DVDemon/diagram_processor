@@ -12,6 +12,7 @@
 #include "../src/plantuml/plantuml_c4.h"
 #include "../src/drawio/drawio_parser.h"
 #include "../src/confluence/confluence_parser.h"
+#include "../src/confluence/confluence_client.h"
 
 #ifdef _WIN32
 #define TEST_FIXTURES_BASE TEST_FIXTURES_PATH
@@ -263,3 +264,26 @@ INSTANTIATE_TEST_SUITE_P(
         std::make_pair("plantuml_only", "plantuml_only")
     )
 );
+
+// Child page list JSON (Cloud v2 shape + pagination link)
+TEST(ConfluenceClientJson, ExtractChildPageIdsCloudV2) {
+    const char* json = R"({"results":[{"id":"111","title":"A"},{"id":"222","title":"B"}]})";
+    auto ids = confluence::ConfluenceClient::extractChildPageIds(json);
+    ASSERT_EQ(ids.size(), 2u);
+    EXPECT_EQ(ids[0], "111");
+    EXPECT_EQ(ids[1], "222");
+}
+
+TEST(ConfluenceClientJson, ExtractChildPageIdsServerContentWrapper) {
+    const char* json = R"({"results":[{"type":"page","content":{"id":"999","type":"page"}}]})";
+    auto ids = confluence::ConfluenceClient::extractChildPageIds(json);
+    ASSERT_EQ(ids.size(), 1u);
+    EXPECT_EQ(ids[0], "999");
+}
+
+// Pagination: next path must be followed by fetchAllDirectChildPageIds (integration); here we only
+// document that _links.next is relative to site root (see extractCloudChildrenNextPath in client).
+TEST(ConfluenceClientJson, ExtractChildPageIdsEmptyResults) {
+    auto ids = confluence::ConfluenceClient::extractChildPageIds(R"({"size":0})");
+    EXPECT_TRUE(ids.empty());
+}

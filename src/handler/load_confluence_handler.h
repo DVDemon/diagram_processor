@@ -6,13 +6,46 @@
 #include <Poco/URI.h>
 #include <Poco/Logger.h>
 #include <Poco/Timestamp.h>
+#include <Poco/JSON/Array.h>
+#include <Poco/JSON/Object.h>
+#include <Poco/JSON/Parser.h>
+#include <Poco/JSON/Stringifier.h>
 
 #include "request_counter.h"
 #include "../confluence/confluence_client.h"
 
+#include <sstream>
 #include <string>
 
 namespace handlers {
+
+namespace {
+
+Poco::JSON::Object::Ptr pageTreeToJson(const confluence::LoadedConfluencePage& node) {
+    Poco::JSON::Object::Ptr o = new Poco::JSON::Object();
+    o->set("page_id", node.pageId);
+    if (node.circularSkip) {
+        o->set("error", "circular_reference_in_page_hierarchy");
+        o->set("children", Poco::JSON::Array::Ptr(new Poco::JSON::Array()));
+        return o;
+    }
+    std::string html = confluence::ConfluenceClient::storageHtmlFromPageJson(node.pageJson);
+    o->set("html", html);
+    try {
+        Poco::JSON::Parser parser;
+        o->set("page", parser.parse(node.pageJson).extract<Poco::JSON::Object::Ptr>());
+    } catch (...) {
+        o->set("page_raw", node.pageJson);
+    }
+    Poco::JSON::Array::Ptr children = new Poco::JSON::Array();
+    for (const auto& ch : node.children) {
+        children->add(pageTreeToJson(*ch));
+    }
+    o->set("children", children);
+    return o;
+}
+
+} // namespace
 
 class LoadConfluenceHandler : public Poco::Net::HTTPRequestHandler {
 public:
@@ -48,9 +81,47 @@ public:
             }
 
             confluence::ConfluenceClient client;
-            std::string responseBody = (includeSubpages == "1" || includeSubpages == "true")
-                ? client.getPageWithIncludes(pageId)
-                : client.getPageById(pageId);
+            bool useIncludes = (includeSubpages == "1" || includeSubpages == "true");
+            // include_subpages: resolve include macros, then recursively load direct child pages (same for each child).
+            Poco::JSON::Object::Ptr rootPtr;
+            if (useIncludes) {
+                confluence::LoadedConfluencePage tree = client.loadPageSubtree(pageId, true);
+                std::string html = confluence::ConfluenceClient::storageHtmlFromPageJson(tree.pageJson);
+                if (html.empty()) {
+                    response.setStatus(Poco::Net::HTTPResponse::HTTP_BAD_GATEWAY);
+                    std::ostream& ostr = response.send();
+                    ostr << R"({"error":"Failed to load page content"})";
+                    if (g_httpErrors) g_httpErrors->inc();
+                    logDuration(start, request, 502, logger);
+                    return;
+                }
+                rootPtr = pageTreeToJson(tree);
+            } else {
+                std::string pageJson = client.getPageById(pageId);
+                std::string html = confluence::ConfluenceClient::storageHtmlFromPageJson(pageJson);
+                if (html.empty()) {
+                    response.setStatus(Poco::Net::HTTPResponse::HTTP_BAD_GATEWAY);
+                    std::ostream& ostr = response.send();
+                    ostr << R"({"error":"Failed to load page content"})";
+                    if (g_httpErrors) g_httpErrors->inc();
+                    logDuration(start, request, 502, logger);
+                    return;
+                }
+                rootPtr = new Poco::JSON::Object();
+                rootPtr->set("page_id", pageId);
+                rootPtr->set("html", html);
+                try {
+                    Poco::JSON::Parser parser;
+                    rootPtr->set("page", parser.parse(pageJson).extract<Poco::JSON::Object::Ptr>());
+                } catch (...) {
+                    rootPtr->set("page_raw", pageJson);
+                }
+                rootPtr->set("children", Poco::JSON::Array::Ptr(new Poco::JSON::Array()));
+            }
+
+            std::stringstream ss;
+            Poco::JSON::Stringifier::stringify(*rootPtr, ss);
+            std::string responseBody = ss.str();
 
             response.setStatus(Poco::Net::HTTPResponse::HTTP_OK);
             std::ostream& ostr = response.send();
@@ -70,7 +141,7 @@ public:
                 ostr << R"({"error":")" << escapeJson(errMsg) << "\"}";
             }
             if (g_httpErrors) g_httpErrors->inc();
-            logger.error("load_confluence: %s", errMsg);
+            logger.error("load_confluence: %s", errMsg.c_str());
             logDuration(start, request, response.getStatus(), logger);
 
         } catch (const std::exception& e) {
