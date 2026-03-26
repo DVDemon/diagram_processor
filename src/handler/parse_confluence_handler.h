@@ -15,9 +15,14 @@
 #include "../confluence/confluence_parser.h"
 
 #include <set>
+#include <algorithm>
+#include <cctype>
+#include <regex>
 #include <sstream>
+#include <functional>
 #include <string>
 #include <utility>
+#include <unordered_set>
 #include <vector>
 
 namespace handlers {
@@ -59,6 +64,9 @@ public:
             bool useIncludes = (includeSubpages == "1" || includeSubpages == "true");
             std::vector<std::pair<std::string, confluence::Diagram>> diagramRows;
             std::set<std::string> resolvedKeys;
+            // Global deduplication to ensure no duplicate diagrams are returned
+            // even if they come from multiple macro/embed/plugin variants or multiple pages.
+            std::unordered_set<size_t> emittedDiagramHashes;
 
             if (useIncludes) {
                 confluence::LoadedConfluencePage tree = client.loadPageSubtree(pageId, true);
@@ -71,7 +79,7 @@ public:
                     logDuration(start, request, 502, logger);
                     return;
                 }
-                appendDiagramsFromPageTree(tree, client, diagramRows, resolvedKeys);
+                appendDiagramsFromPageTree(tree, client, diagramRows, resolvedKeys, emittedDiagramHashes);
             } else {
                 std::string html = client.getPageBodyById(pageId);
                 if (html.empty()) {
@@ -82,7 +90,7 @@ public:
                     logDuration(start, request, 502, logger);
                     return;
                 }
-                appendDiagramsForPage(pageId, html, client, diagramRows, resolvedKeys, false);
+                appendDiagramsForPage(pageId, html, client, diagramRows, resolvedKeys, emittedDiagramHashes, false);
             }
 
             Poco::JSON::Object root;
@@ -136,11 +144,99 @@ public:
     }
 
 private:
+    static size_t diagramHash(const confluence::Diagram& d) {
+        // Collision risk exists for hashes, but this is acceptable for "best-effort" dedup.
+        size_t h = std::hash<std::string>{}(d.text);
+        // Mix format into the key to avoid collisions between PlantUML and DrawIO with same text.
+        h ^= (d.format == confluence::DiagramFormat::DrawIO)
+                 ? static_cast<size_t>(0x9e3779b97f4a7c15ULL)
+                 : static_cast<size_t>(0x243f6a8885a308d3ULL);
+        return h;
+    }
+
+    static std::string toLowerCopy(std::string s) {
+        for (char& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        return s;
+    }
+
+    static std::string detectPlantUmlTypeInHandler(const std::string& code) {
+        std::string lower = toLowerCopy(code);
+        int seq = 0, comp = 0, c4 = 0, usecase = 0;
+        if (lower.find("participant") != std::string::npos) seq += 3;
+        if (lower.find("activate") != std::string::npos) seq++;
+        if (lower.find("->") != std::string::npos || lower.find("-->") != std::string::npos) seq++;
+        if (lower.find("component") != std::string::npos) comp += 2;
+        if (lower.find("interface") != std::string::npos) comp++;
+        if (lower.find("person") != std::string::npos) c4++;
+        if (lower.find("system") != std::string::npos) c4++;
+        if (lower.find("container") != std::string::npos) c4++;
+        if (lower.find("usecase") != std::string::npos) usecase += 3;
+        if (lower.find("actor") != std::string::npos) usecase++;
+        if (lower.find("extends") != std::string::npos || lower.find("includes") != std::string::npos) usecase++;
+
+        int maxVal = std::max({seq, comp, c4, usecase});
+        if (maxVal == 0) return "unknown";
+        if (seq == maxVal) return "sequence";
+        if (comp == maxVal) return "component";
+        if (c4 == maxVal) return "c4";
+        if (usecase == maxVal) return "usecase";
+        return "unknown";
+    }
+
+    static std::vector<std::string> extractInlinePlantUmlCodeFromHtml(const std::string& html) {
+        // Best-effort: capture PlantUML code that appears as CDATA/plain-text-body even if
+        // the surrounding macro name isn't exactly "plantuml".
+        std::vector<std::string> out;
+        std::regex cdataRe("<!\\[CDATA\\[([\\s\\S]*?@startuml[\\s\\S]*?@enduml[\\s\\S]*?)\\]\\]>",
+                           std::regex::icase);
+        std::sregex_iterator it1(html.begin(), html.end(), cdataRe);
+        std::sregex_iterator end;
+        for (; it1 != end; ++it1) {
+            out.push_back((*it1)[1].str());
+            if (out.size() >= 200) break;
+        }
+
+        std::regex ptbRe("<ac:plain-text-body[^>]*>([\\s\\S]*?@startuml[\\s\\S]*?@enduml[\\s\\S]*?)</ac:plain-text-body>",
+                          std::regex::icase);
+        std::sregex_iterator it2(html.begin(), html.end(), ptbRe);
+        for (; it2 != end; ++it2) {
+            out.push_back((*it2)[1].str());
+            if (out.size() >= 200) break;
+        }
+        return out;
+    }
+
+    static std::vector<std::string> extractInlineDrawioXmlFromHtml(const std::string& html) {
+        // Best-effort: plugin/embedded variants may not be wrapped into ac:structured-macro
+        // with ac:name="drawio". In on-prem storage HTML the actual diagram XML usually still
+        // contains <mxfile> or <mxGraphModel> tags.
+        std::vector<std::string> out;
+
+        std::regex mxfileRe("<mxfile[^>]*>[\\s\\S]*?</mxfile>", std::regex::icase);
+        std::sregex_iterator it1(html.begin(), html.end(), mxfileRe);
+        std::sregex_iterator end;
+        for (; it1 != end; ++it1) {
+            out.push_back((*it1).str());
+            if (out.size() >= 200) break; // safety
+        }
+
+        std::regex mxGraphModelRe("<mxGraphModel[^>]*>[\\s\\S]*?</mxGraphModel>", std::regex::icase);
+        std::sregex_iterator it2(html.begin(), html.end(), mxGraphModelRe);
+        for (; it2 != end; ++it2) {
+            std::string xml = (*it2).str();
+            // Avoid duplicates like when <mxGraphModel> is inside already captured <mxfile>.
+            if (xml.find("<mxfile") == std::string::npos) out.push_back(std::move(xml));
+            if (out.size() >= 200) break;
+        }
+        return out;
+    }
+
     static void appendDiagramsForPage(const std::string& sourcePageId,
                                       const std::string& html,
                                       confluence::ConfluenceClient& client,
                                       std::vector<std::pair<std::string, confluence::Diagram>>& out,
                                       std::set<std::string>& resolvedKeys,
+                                      std::unordered_set<size_t>& emittedDiagramHashes,
                                       bool searchDescendantsForAttachments) {
         auto diagrams = confluence::ConfluenceParser::parse(html);
 
@@ -161,8 +257,62 @@ private:
             }
         }
 
+        // Fallback for embed/plugin: ConfluenceParser might miss some macro names.
+        // If we detect DrawIO XML directly in storage HTML, include it as diagrams too.
+        std::unordered_set<size_t> existingInlineHashes;
+        for (const auto& d : diagrams) {
+            if (d.format != confluence::DiagramFormat::DrawIO) continue;
+            if (d.text.find("<mxfile") != std::string::npos ||
+                d.text.find("<mxGraphModel") != std::string::npos) {
+                existingInlineHashes.insert(std::hash<std::string>{}(d.text));
+            }
+        }
+        auto inlineXmls = extractInlineDrawioXmlFromHtml(html);
+        for (const auto& xml : inlineXmls) {
+            size_t h = std::hash<std::string>{}(xml);
+            if (existingInlineHashes.count(h) == 0) {
+                confluence::Diagram d;
+                d.text = xml;
+                d.format = confluence::DiagramFormat::DrawIO;
+                d.subtype = confluence::ConfluenceParser::detectDrawIOTypePublic(xml);
+                d.sectionTitle.clear();
+                diagrams.push_back(std::move(d));
+                existingInlineHashes.insert(h);
+            }
+        }
+
         for (auto& d : diagrams) {
-            out.emplace_back(sourcePageId, std::move(d));
+            size_t h = diagramHash(d);
+            if (emittedDiagramHashes.insert(h).second) {
+                out.emplace_back(sourcePageId, std::move(d));
+            }
+        }
+
+        // Fallback for embed/plugin variants: PlantUML code may exist in storage HTML without
+        // being wrapped by ac:name="plantuml" exactly. Add it best-effort.
+        std::unordered_set<size_t> existingPlantHashes;
+        for (const auto& d : diagrams) {
+            if (d.format != confluence::DiagramFormat::PlantUML) continue;
+            if (d.text.find("@startuml") == std::string::npos &&
+                d.text.find("@enduml") == std::string::npos) {
+                continue;
+            }
+            existingPlantHashes.insert(std::hash<std::string>{}(d.text));
+        }
+
+        auto plantCodes = extractInlinePlantUmlCodeFromHtml(html);
+        for (const auto& code : plantCodes) {
+            size_t h = std::hash<std::string>{}(code);
+            if (existingPlantHashes.count(h) != 0) continue;
+            confluence::Diagram d;
+            d.text = code;
+            d.format = confluence::DiagramFormat::PlantUML;
+            d.subtype = detectPlantUmlTypeInHandler(code);
+            d.sectionTitle.clear();
+            if (emittedDiagramHashes.insert(diagramHash(d)).second) {
+                out.emplace_back(sourcePageId, std::move(d));
+            }
+            existingPlantHashes.insert(h);
         }
 
         auto discovered = client.getDrawioAttachmentsByContent(sourcePageId, searchDescendantsForAttachments);
@@ -174,7 +324,9 @@ private:
                 d.format = confluence::DiagramFormat::DrawIO;
                 d.subtype = confluence::ConfluenceParser::detectDrawIOTypePublic(p.second);
                 d.sectionTitle = p.first;
-                out.emplace_back(sourcePageId, std::move(d));
+                if (emittedDiagramHashes.insert(diagramHash(d)).second) {
+                    out.emplace_back(sourcePageId, std::move(d));
+                }
                 resolvedKeys.insert(std::move(key));
             }
         }
@@ -183,15 +335,16 @@ private:
     static void appendDiagramsFromPageTree(const confluence::LoadedConfluencePage& node,
                                            confluence::ConfluenceClient& client,
                                            std::vector<std::pair<std::string, confluence::Diagram>>& out,
-                                           std::set<std::string>& resolvedKeys) {
+                                           std::set<std::string>& resolvedKeys,
+                                           std::unordered_set<size_t>& emittedDiagramHashes) {
         if (!node.circularSkip) {
             std::string html = confluence::ConfluenceClient::storageHtmlFromPageJson(node.pageJson);
             if (!html.empty()) {
-                appendDiagramsForPage(node.pageId, html, client, out, resolvedKeys, false);
+                appendDiagramsForPage(node.pageId, html, client, out, resolvedKeys, emittedDiagramHashes, false);
             }
         }
         for (const auto& ch : node.children) {
-            appendDiagramsFromPageTree(*ch, client, out, resolvedKeys);
+            appendDiagramsFromPageTree(*ch, client, out, resolvedKeys, emittedDiagramHashes);
         }
     }
 
