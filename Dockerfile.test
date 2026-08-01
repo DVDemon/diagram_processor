@@ -1,4 +1,6 @@
-# Dockerfile for running unit tests
+# Dockerfile for running the server and unit tests with AddressSanitizer / UndefinedBehaviorSanitizer.
+# Builds POCO normally and instruments only our code (faster, focuses on our bugs).
+# CMD runs: 1) parser_tests under ASan/UBSan, 2) server smoke-test under ASan/UBSan.
 FROM ubuntu:24.04
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -8,9 +10,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     libssl-dev \
     zlib1g-dev \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Build POCO from source
+# Build POCO from source (Prometheus support requires 1.12+)
 ARG POCO_VERSION=1.15.0
 WORKDIR /build
 RUN git clone --depth 1 --branch poco-${POCO_VERSION}-release https://github.com/pocoproject/poco.git
@@ -20,15 +23,26 @@ RUN mkdir cmake-build && cd cmake-build \
     && cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local \
     && cmake --build . --target install -j$(nproc)
 
-# Build application with tests
+# Build application and tests with sanitizers
 WORKDIR /build/app
 COPY CMakeLists.txt ./
 COPY src ./src/
 COPY test ./test/
 
 RUN mkdir build && cd build \
-    && cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=/usr/local \
+    && cmake .. -DCMAKE_BUILD_TYPE=Debug \
+       -DCMAKE_PREFIX_PATH=/usr/local \
+       -DCMAKE_C_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer -g" \
+       -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer -g" \
+       -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined" \
     && cmake --build . -j$(nproc)
 
 WORKDIR /build/app/build
-CMD ["./parser_tests"]
+
+ENV ASAN_OPTIONS=detect_leaks=1:halt_on_error=1:abort_on_error=1
+ENV UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1
+
+COPY test/run_sanitizers.sh /usr/local/bin/run_sanitizers.sh
+RUN chmod +x /usr/local/bin/run_sanitizers.sh
+
+CMD ["/usr/local/bin/run_sanitizers.sh"]

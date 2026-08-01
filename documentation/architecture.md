@@ -122,6 +122,14 @@ HTTPS-клиент к REST API Confluence:
 - Заголовок `Authorization: Bearer <OPENAI_API_KEY>`.
 - Парсинг ответа `choices[0].message.content`.
 
+### 8. Асинхронный менеджер AI (`async_openai_manager.h`)
+
+- `AsyncOpenAIManager` — синглтон: `std::unordered_map<int64_t, AsyncJob>` (id → задача) + `Poco::ThreadPool`.
+- `AsyncJob`: `id`, `startTime` (время старта), `retries` (число перепосылов), `bytesSent` (байт отправлено в ИИ), `status` (`running`/`completed`/`failed`), `result`/`error`, `prompt`.
+- `submit()` генерирует id, сохраняет задачу и ставит в пул; воркер вызывает `OpenAIClient::chatCompletion` с ретраями (`OPENAI_MAX_RETRIES`), обновляет `retries`/`bytesSent`/`status`.
+- Старые завершённые задачи удаляются при превышении `OPENAI_ASYNC_MAX_JOBS`.
+- Эндпоинты: `POST process_with_ai_async`, `GET async_ai_status`, `GET async_ai_result`.
+
 ## Поток запроса (пример `parse_confluence`)
 
 ```mermaid

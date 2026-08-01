@@ -71,11 +71,25 @@ def http(method, path, body=None, timeout=TIMEOUT,
 
 def http_json(method, path, body=None, timeout=TIMEOUT, expected=200,
               content_type=None) -> Dict[str, Any]:
-    """Like http(), but asserts the expected status and a JSON body, returning the dict."""
+    """Like http(), but asserts the expected status (int or tuple) and a JSON body."""
     status, data, raw = http(method, path, body, timeout, content_type)
-    assert status == expected, f"{method} {path} -> HTTP {status}, expected {expected}: {raw[:300]}"
+    ok = (status == expected) if isinstance(expected, int) else (status in expected)
+    assert ok, f"{method} {path} -> HTTP {status}, expected {expected}: {raw[:300]}"
     assert data is not None, f"non-JSON response for {method} {path}: {raw[:300]}"
     return data
+
+
+def _poll_ai_result(request_id: int, timeout: float = 60.0, interval: float = 0.5) -> Dict[str, Any]:
+    """Опрашивает /async_ai_result до тех пор, пока статус не перестанет быть running."""
+    import time
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        data = http_json("GET", f"/api/v1/async_ai_result?request_id={request_id}",
+                         expected=(200, 202))
+        if data.get("status") != "running":
+            return data
+        time.sleep(interval)
+    raise AssertionError(f"async job {request_id} did not finish within {timeout}s")
 
 
 def _maybe_json(raw) -> Optional[Dict[str, Any]]:
@@ -168,6 +182,55 @@ def test_process_with_ai_invalid_json():
     data = http_json("POST", "/api/v1/process_with_ai", "not json{{{",
                      content_type="application/json", expected=400)
     assert data.get("success") is False
+
+
+# --- async AI (process_with_ai_async / async_ai_status / async_ai_result) --- #
+
+def test_process_with_ai_async():
+    if SKIP_AI:
+        _skip("async AI skipped (SKIP_AI=1)")
+        return
+    data = http_json("POST", "/api/v1/process_with_ai_async", {"text": "Ответь одним словом: 2+2?"},
+                     expected=202)
+    rid = data.get("request_id")
+    assert isinstance(rid, int) and rid > 0, f"bad request_id: {rid}"
+    assert data.get("status") == "running"
+
+    # Статусный эндпоинт должен отвечать в любом состоянии
+    st = http_json("GET", f"/api/v1/async_ai_status?request_id={rid}")
+    assert st.get("status") in ("running", "completed", "failed")
+    assert "start_time_ms" in st
+    assert "retries" in st and "bytes_sent" in st
+
+    # Дожидаемся завершения и берём результат
+    res = _poll_ai_result(rid)
+    assert res.get("status") == "completed", f"unexpected: {res}"
+    assert res.get("result"), "empty async result"
+
+
+def test_process_with_ai_async_missing_text():
+    data = http_json("POST", "/api/v1/process_with_ai_async", {}, expected=400)
+    assert "text" in data.get("error", "")
+
+
+def test_async_ai_status_missing_request_id():
+    data = http_json("GET", "/api/v1/async_ai_status", expected=400)
+    assert "request_id" in data.get("error", "")
+
+
+def test_async_ai_status_invalid_request_id():
+    data = http_json("GET", "/api/v1/async_ai_status?request_id=abc", expected=400)
+    assert "integer" in data.get("error", "")
+
+
+def test_async_ai_status_not_found():
+    data = http_json("GET", "/api/v1/async_ai_status?request_id=99999999", expected=404)
+    assert "not found" in data.get("error", "")
+
+
+def test_async_ai_result_not_found():
+    data = http_json("GET", "/api/v1/async_ai_result?request_id=99999999", expected=404)
+    assert "not found" in data.get("error", "")
 
 
 # --- parse_plantuml_sequence ----------------------------------------------- #
@@ -346,6 +409,12 @@ def _ordered_tests():
         ("process_with_ai", test_process_with_ai),
         ("process_with_ai: missing text -> 400", test_process_with_ai_missing_text),
         ("process_with_ai: invalid JSON -> 400", test_process_with_ai_invalid_json),
+        ("process_with_ai_async (submit→status→result)", test_process_with_ai_async),
+        ("process_with_ai_async: missing text -> 400", test_process_with_ai_async_missing_text),
+        ("async_ai_status: missing request_id -> 400", test_async_ai_status_missing_request_id),
+        ("async_ai_status: invalid request_id -> 400", test_async_ai_status_invalid_request_id),
+        ("async_ai_status: unknown id -> 404", test_async_ai_status_not_found),
+        ("async_ai_result: unknown id -> 404", test_async_ai_result_not_found),
         ("parse_plantuml_sequence", test_parse_plantuml_sequence),
         ("parse_plantuml_sequence: not a sequence -> 400", test_parse_plantuml_sequence_not_sequence),
         ("parse_plantuml_c4", test_parse_plantuml_c4),

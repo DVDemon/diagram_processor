@@ -53,6 +53,17 @@ cd build && ctest --output-on-failure   # или ./parser_tests
 - PlantUML C4: `rectangle_c4`, `c4_lib`
 - DrawIO: `simple_c4`, `multi_component`, `complex`
 
+### Санитайзерные тесты (`Dockerfile.test`, ASan/UBSan)
+
+`Dockerfile.test` собирает сервер и тесты с `-fsanitize=address,undefined` и запускает: 1) `parser_tests`, 2) smoke-тест сервера (metrics + парсеры + обработка ошибок). Логи проверяются на `ERROR: AddressSanitizer` / `runtime error:`; завершается с ошибкой при любом срабатывании.
+
+```bash
+docker build -f Dockerfile.test -t poco_ai_server_test .
+docker run --rm poco_ai_server_test      # exit 0 = все санитайзерные проверки пройдены
+```
+
+POCO при этом собирается без санитайзеров (инструментируется только наш код); локальная санитайзер-сборка — через `build-san`, см. README.
+
 ### Интеграционные тесты API (`test/api_integration_test.py`)
 
 Проверяют **все HTTP-эндпоинты** против запущенного сервера и реального Confluence (по умолчанию страницы `1135648503` и `724160182`). Требуют поднятый сервер и настроенный `CONFLUENCE_*` в `.env`.
@@ -78,7 +89,7 @@ python3 -m pytest test/api_integration_test.py -v
 | `SKIP_AI=1` | выкл | пропустить `process_with_ai` (реальный вызов API, расходует кредиты) |
 | `TEST_TIMEOUT` | `120` | таймаут запроса, сек |
 
-Что покрывается: `process_with_ai` (успех + ошибки), все три парсера (валидные/невалидные входы), `load_confluence` и `parse_confluence` (обе страницы, `include_subpages`, ошибка без `page_id`), пайплайн `parse_confluence → parse_drawio`, `metrics`, `swagger.yaml`, `404`/`400`, утилита `json2dot.py`.
+Что покрывается: `process_with_ai` (успех + ошибки), асинхронный AI (`process_with_ai_async` → `async_ai_status` → `async_ai_result`, включая ошибки `400`/`404`), все три парсера (валидные/невалидные входы), `load_confluence` и `parse_confluence` (обе страницы, `include_subpages`, ошибка без `page_id`), пайплайн `parse_confluence → parse_drawio`, `metrics`, `swagger.yaml`, `404`/`400`, утилита `json2dot.py`.
 - Confluence-парсер: `mixed_diagrams`, `plantuml_only`
 - JSON-разбор Confluence-клиента: `extractChildPageIds` (v2-формат, server-обёртка, пустые результаты)
 

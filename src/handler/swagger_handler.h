@@ -67,6 +67,117 @@ paths:
           description: AI API error
         '503':
           description: AI service not configured
+  /api/v1/process_with_ai_async:
+    post:
+      summary: Start async AI processing
+      description: Запускает асинхронную AI-задачу и сразу возвращает request_id (HTTP 202). Статус и результат опрашиваются через /api/v1/async_ai_status и /api/v1/async_ai_result.
+      operationId: postProcessWithAIAsync
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: One of text, prompt or message is required
+              properties:
+                text: { type: string }
+                prompt: { type: string }
+                message: { type: string }
+            example:
+              text: "Привет! Коротко опиши себя."
+      responses:
+        '202':
+          description: Task accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  request_id:
+                    type: integer
+                    format: int64
+                  status:
+                    type: string
+                    example: running
+        '400':
+          description: Invalid request (missing text/prompt/message, empty body, invalid JSON)
+        '503':
+          description: AI service not configured
+  /api/v1/async_ai_status:
+    get:
+      summary: Get async AI task status
+      description: Возвращает статус задачи (running/completed/failed), время старта, число пересылок и отправленные байты.
+      operationId: getAsyncAIStatus
+      parameters:
+        - name: request_id
+          in: query
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          description: Status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  request_id:
+                    type: integer
+                    format: int64
+                  status:
+                    type: string
+                    enum: [running, completed, failed]
+                  start_time_ms:
+                    type: integer
+                    format: int64
+                  retries:
+                    type: integer
+                  bytes_sent:
+                    type: integer
+        '400':
+          description: Missing or invalid request_id
+        '404':
+          description: request_id not found
+  /api/v1/async_ai_result:
+    get:
+      summary: Get async AI task result
+      description: Возвращает ответ LLM (completed), описание ошибки (failed) или HTTP 202, если задача ещё выполняется.
+      operationId: getAsyncAIResult
+      parameters:
+        - name: request_id
+          in: query
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          description: Completed or failed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  request_id:
+                    type: integer
+                    format: int64
+                  status:
+                    type: string
+                    enum: [running, completed, failed]
+                  result:
+                    type: string
+                    description: Ответ LLM при status=completed
+                  error:
+                    type: string
+                    description: Описание ошибки при status=failed
+        '202':
+          description: Task is still running
+        '400':
+          description: Missing or invalid request_id
+        '404':
+          description: request_id not found
   /api/v1/load_confluence:
     get:
       summary: Load Confluence page

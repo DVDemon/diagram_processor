@@ -5,6 +5,8 @@
 #include <string>
 #include <Poco/Net/HTTPServerRequest.h>
 
+#include "async_ai_result_handler.h"
+#include "async_ai_status_handler.h"
 #include "load_confluence_handler.h"
 #include "metrics_handler.h"
 #include "not_found_handler.h"
@@ -12,6 +14,7 @@
 #include "parse_drawio_handler.h"
 #include "parse_plantuml_c4_handler.h"
 #include "parse_plantuml_sequence_handler.h"
+#include "process_with_ai_async_handler.h"
 #include "process_with_ai_handler.h"
 #include "swagger_handler.h"
 
@@ -26,6 +29,9 @@ public:
 
         if (uri == "/api/v1/process_with_ai" && method == "POST") {
             return new ProcessWithAIHandler();
+        }
+        if (uri == "/api/v1/process_with_ai_async" && method == "POST") {
+            return new ProcessWithAIAsyncHandler();
         }
         if (uri == "/api/v1/parse_plantuml_sequence" && method == "POST") {
             return new ParsePlantumlSequenceHandler();
@@ -44,6 +50,12 @@ public:
             }
             if (path == "/api/v1/parse_confluence") {
                 return new ParseConfluenceHandler();
+            }
+            if (path == "/api/v1/async_ai_status") {
+                return new AsyncAIStatusHandler();
+            }
+            if (path == "/api/v1/async_ai_result") {
+                return new AsyncAIResultHandler();
             }
         }
         if (uri == "/swagger.yaml" && method == "GET") {

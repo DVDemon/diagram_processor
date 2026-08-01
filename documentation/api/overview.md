@@ -17,8 +17,18 @@
 | `parse_plantuml_c4` | `text`, `plantuml`, `content` |
 | `parse_drawio` | `text`, `xml`, `content`, `drawio` |
 | `process_with_ai` | `text`, `prompt`, `message` |
+| `process_with_ai_async` | `text`, `prompt`, `message` |
 
 Если ни одного из ключей нет — `400 Bad Request`.
+
+### Асинхронный AI (паттерн опроса)
+
+`process_with_ai_async` не блокирует запрос: возвращает `request_id` (HTTP `202`), далее опрашиваются два GET-эндпоинта:
+
+1. `GET /api/v1/async_ai_status?request_id={id}` — статус (`running`/`completed`/`failed`), `start_time_ms`, `retries`, `bytes_sent`;
+2. `GET /api/v1/async_ai_result?request_id={id}` — ответ LLM при `completed`, описание ошибки при `failed`, либо HTTP `202`, пока задача выполняется.
+
+Подробно — [process-with-ai-async.md](process-with-ai-async.md).
 
 ### Raw-текст
 

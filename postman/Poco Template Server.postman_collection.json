@@ -99,6 +99,87 @@
       "response": []
     },
     {
+      "name": "Process With AI Async",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/v1/process_with_ai_async",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "process_with_ai_async"
+          ]
+        },
+        "description": "Запуск асинхронной AI-задачи. Возвращает request_id (HTTP 202).",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"text\": \"Напиши краткое резюме этой архитектуры\"\n}"
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Async AI Status",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/api/v1/async_ai_status?request_id={{request_id}}",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "async_ai_status"
+          ],
+          "query": [
+            {
+              "key": "request_id",
+              "value": "{{request_id}}"
+            }
+          ]
+        },
+        "description": "Статус асинхронной AI-задачи: status, start_time_ms, retries, bytes_sent. Создайте переменную request_id после запуска задачи."
+      },
+      "response": []
+    },
+    {
+      "name": "Async AI Result",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/api/v1/async_ai_result?request_id={{request_id}}",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "async_ai_result"
+          ],
+          "query": [
+            {
+              "key": "request_id",
+              "value": "{{request_id}}"
+            }
+          ]
+        },
+        "description": "Результат асинхронной AI-задачи: result (completed) или error (failed). 202, пока выполняется."
+      },
+      "response": []
+    },
+    {
       "name": "Parse PlantUML Sequence",
       "request": {
         "method": "POST",

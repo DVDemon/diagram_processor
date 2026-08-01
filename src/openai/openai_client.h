@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Poco/Net/HTTPClientSession.h>
 #include <Poco/Net/HTTPSClientSession.h>
 #include <Poco/Net/HTTPRequest.h>
 #include <Poco/Net/HTTPResponse.h>
@@ -13,11 +14,28 @@
 #include <Poco/NumberParser.h>
 #include <Poco/Logger.h>
 
+#include <memory>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 
 namespace openai {
+
+/**
+ * Ошибка OpenAI-совместимого API с HTTP-статусом ответа.
+ * Позволяет отличать транзиентные ошибки (429, 5xx — допустимо перепосылать)
+ * от постоянных (4xx — перепосылать бессмысленно).
+ */
+class OpenAIAPIException : public std::runtime_error {
+public:
+    OpenAIAPIException(int httpStatus, const std::string& message)
+        : std::runtime_error(message), httpStatus_(httpStatus) {
+    }
+    int httpStatus() const noexcept { return httpStatus_; }
+
+private:
+    int httpStatus_;
+};
 
 /**
  * Client for OpenAI-compatible API (OpenAI, DeepSeek, etc.).
@@ -28,6 +46,13 @@ namespace openai {
  *   OPENAI_SYSTEM_PROMPT - System prompt (optional)
  *   OPENAI_TIMEOUT     - Timeout in seconds (default: 60)
  *   OPENAI_SSL_VERIFY  - "0" or "false" to disable cert verification (default: disabled for compatibility)
+ *
+ * Транспорт выбирается автоматически по схеме в OPENAI_API_URL:
+ *   https:// -> HTTPSClientSession (TLS, с проверкой сертификатов по OPENAI_SSL_VERIFY),
+ *   http://  -> HTTPClientSession  (plain HTTP, подходит для локальных серверов без TLS).
+ *
+ * HTTP-ошибки API (любой статус ≠ 200) выбрасываются как OpenAIAPIException,
+ * в котором есть httpStatus() — по нему вызывающий может решить, перепосылать ли запрос.
  */
 class OpenAIClient {
 public:
@@ -82,17 +107,22 @@ public:
         body.stringify(bodyStream);
         std::string bodyStr = bodyStream.str();
 
-        Poco::Net::Context::Ptr sslContext;
-        if (verifySsl_) {
-            sslContext = new Poco::Net::Context(Poco::Net::Context::CLIENT_USE, "", "", "",
-                                                Poco::Net::Context::VERIFY_STRICT);
+        // Автовыбор транспорта по схеме URL: http:// -> plain HTTP, https:// -> TLS.
+        std::unique_ptr<Poco::Net::HTTPClientSession> session;
+        if (uri.getScheme() == "http") {
+            session = std::make_unique<Poco::Net::HTTPClientSession>(uri.getHost(), uri.getPort());
         } else {
-            sslContext = new Poco::Net::Context(Poco::Net::Context::CLIENT_USE, "", "", "",
-                                                Poco::Net::Context::VERIFY_NONE);
+            Poco::Net::Context::Ptr sslContext;
+            if (verifySsl_) {
+                sslContext = new Poco::Net::Context(Poco::Net::Context::CLIENT_USE, "", "", "",
+                                                    Poco::Net::Context::VERIFY_STRICT);
+            } else {
+                sslContext = new Poco::Net::Context(Poco::Net::Context::CLIENT_USE, "", "", "",
+                                                    Poco::Net::Context::VERIFY_NONE);
+            }
+            session = std::make_unique<Poco::Net::HTTPSClientSession>(uri.getHost(), uri.getPort(), sslContext);
         }
-
-        Poco::Net::HTTPSClientSession session(uri.getHost(), uri.getPort(), sslContext);
-        session.setTimeout(Poco::Timespan(timeoutSec_, 0));
+        session->setTimeout(Poco::Timespan(timeoutSec_, 0));
 
         Poco::Net::HTTPRequest req(Poco::Net::HTTPRequest::HTTP_POST, path,
                                    Poco::Net::HTTPMessage::HTTP_1_1);
@@ -100,10 +130,10 @@ public:
         req.setContentLength(static_cast<std::streamsize>(bodyStr.size()));
         req.set("Authorization", "Bearer " + apiKey_);
 
-        session.sendRequest(req) << bodyStr;
+        session->sendRequest(req) << bodyStr;
 
         Poco::Net::HTTPResponse res;
-        std::istream& rs = session.receiveResponse(res);
+        std::istream& rs = session->receiveResponse(res);
 
         std::string responseBody;
         Poco::StreamCopier::copyToString(rs, responseBody);
@@ -111,7 +141,8 @@ public:
         if (res.getStatus() != Poco::Net::HTTPResponse::HTTP_OK) {
             auto& logger = Poco::Logger::get("OpenAIClient");
             logger.error("OpenAI API error: %d - %s", static_cast<int>(res.getStatus()), responseBody);
-            throw std::runtime_error("OpenAI API error: " + std::to_string(res.getStatus()) + " - " + responseBody);
+            throw OpenAIAPIException(static_cast<int>(res.getStatus()),
+                                     "OpenAI API error: " + std::to_string(res.getStatus()) + " - " + responseBody);
         }
 
         return parseChatResponse(responseBody);

@@ -16,6 +16,7 @@ REST-сервер на C++ (POCO) для разбора архитектурны
 |---|---|
 | [API — общие соглашения](api/overview.md) | Формат запросов/ответов, коды ошибок, логирование, метрики |
 | [POST /api/v1/process_with_ai](api/process-with-ai.md) | Отправка текста в AI (DeepSeek/OpenAI) |
+| [Async AI API](api/process-with-ai-async.md) | Асинхронные задачи AI: `process_with_ai_async`, `async_ai_status`, `async_ai_result` |
 | [POST /api/v1/parse_plantuml_sequence](api/parse-plantuml-sequence.md) | Разбор PlantUML Sequence |
 | [POST /api/v1/parse_plantuml_c4](api/parse-plantuml-c4.md) | Разбор PlantUML C4 |
 | [POST /api/v1/parse_drawio](api/parse-drawio.md) | Разбор DrawIO C4 |

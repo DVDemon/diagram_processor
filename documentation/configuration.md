@@ -14,11 +14,19 @@
 | Переменная | По умолчанию | Описание |
 |---|---|---|
 | `OPENAI_API_KEY` | — (обязательна) | API-ключ. Если не задан — `503`. |
-| `OPENAI_API_URL` | `https://api.deepseek.com` | Базовый URL API. Путь `/v1/chat/completions` дописывается автоматически (если URL уже оканчивается на `/v1` — дописывается `/chat/completions`). |
+| `OPENAI_API_URL` | `https://api.deepseek.com` | Базовый URL API. Транспорт выбирается по схеме: `https://` → TLS, `http://` → plain HTTP (для локальных серверов). Путь `/v1/chat/completions` дописывается автоматически (если URL уже оканчивается на `/v1` — дописывается `/chat/completions`). |
 | `OPENAI_MODEL` | `deepseek-chat` | Имя модели |
 | `OPENAI_SYSTEM_PROMPT` | — | Системный промпт (отправляется с ролью `system`) |
 | `OPENAI_TIMEOUT` | `60` | Таймаут запроса, сек |
 | `OPENAI_SSL_VERIFY` | `false` | `true`/`1`/`yes` — проверка SSL-сертификатов (по умолчанию отключена для совместимости) |
+
+### Асинхронные задачи AI (`process_with_ai_async` / `async_ai_status` / `async_ai_result`)
+
+| Переменная | По умолчанию | Описание |
+|---|---|---|
+| `OPENAI_ASYNC_MAX_THREADS` | `4` | Размер пула потоков (`Poco::ThreadPool`) |
+| `OPENAI_MAX_RETRIES` | `3` | Число повторных пересылок запроса при транзиентных ошибках AI (`429`/`5xx`) |
+| `OPENAI_ASYNC_MAX_JOBS` | `10000` | Максимум хранимых задач в памяти (старые завершённые удаляются) |
 
 ## Confluence — эндпоинты `load_confluence` / `parse_confluence`
 

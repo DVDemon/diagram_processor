@@ -59,6 +59,9 @@ poco_ai_server/
 ## Endpoints
 
 - `POST /api/v1/process_with_ai` — обработка текста через AI (DeepSeek/OpenAI). JSON: `{ "text" | "prompt" | "message": "..." }`
+- `POST /api/v1/process_with_ai_async` — запуск асинхронной AI-задачи, возвращает `request_id` (HTTP 202)
+- `GET /api/v1/async_ai_status?request_id={id}` — статус асинхронной задачи (`running`/`completed`/`failed`, `retries`, `bytes_sent`)
+- `GET /api/v1/async_ai_result?request_id={id}` — результат асинхронной задачи (ответ LLM или описание ошибки)
 - `POST /api/v1/parse_plantuml_sequence` — разбор PlantUML Sequence. JSON: `{ "text": "..." }`
 - `POST /api/v1/parse_plantuml_c4` — разбор PlantUML C4. JSON: `{ "text": "..." }`
 - `POST /api/v1/parse_drawio` — разбор DrawIO C4. JSON: `{ "text" | "xml" | "content" | "drawio": "..." }` (XML диаграммы)
@@ -72,11 +75,14 @@ poco_ai_server/
 - `PORT` — порт сервера (по умолчанию: 8080)
 - `LOG_LEVEL` — уровень логирования: trace, debug, information, notice, warning, error, critical, fatal, none
 - `OPENAI_API_KEY` — API ключ для DeepSeek/OpenAI (обязательно для process_with_ai)
-- `OPENAI_API_URL` — URL API (по умолчанию: https://api.deepseek.com)
+- `OPENAI_API_URL` — URL API (по умолчанию: https://api.deepseek.com). Транспорт выбирается по схеме: `https://` — TLS, `http://` — plain HTTP (для локальных серверов)
 - `OPENAI_MODEL` — модель (по умолчанию: deepseek-chat)
 - `OPENAI_SYSTEM_PROMPT` — системный промпт для AI
 - `OPENAI_TIMEOUT` — таймаут в секундах (по умолчанию: 60)
 - `OPENAI_SSL_VERIFY` — проверка SSL сертификатов: true/false (по умолчанию: false)
+- `OPENAI_ASYNC_MAX_THREADS` — размер пула потоков асинхронных задач (по умолчанию: 4)
+- `OPENAI_MAX_RETRIES` — число повторных пересылок запроса при транзиентных ошибках AI — `429`/`5xx` (по умолчанию: 3; остальные ошибки не пересылаются)
+- `OPENAI_ASYNC_MAX_JOBS` — максимум хранимых асинхронных задач (по умолчанию: 10000)
 - `CONFLUENCE_URL` — базовый URL Confluence без завершающего `/` (on-prem: `https://confluence.corp.local`, при установке в контексте — `https://host/confluence`)
 - `CONFLUENCE_TOKEN` — Personal Access Token (PAT), отправляется как `Authorization: Bearer <token>` (по умолчанию)
 - `CONFLUENCE_AUTH_TYPE` — `pat` (по умолчанию) или `basic`. Для `basic` используется `Authorization: Basic base64(CONFLUENCE_USER:CONFLUENCE_TOKEN)`
@@ -123,13 +129,25 @@ docker run -p 8080:8080 --env-file .env poco_template_server
 ## Прогон тестов
 
 ```bash
-# Юнит-тесты парсеров (Google Test)
+# Юнит-тесты парсеров + smoke-тест сервера под ASan/UBSan (Address/UndefinedBehavior Sanitizer)
 docker build -f Dockerfile.test -t poco_ai_server_test . && docker run --rm poco_ai_server_test
 
 # Интеграционные тесты всех API (нужен запущенный сервер + .env с Confluence)
 python3 test/api_integration_test.py        # standalone (stdlib)
 python3 -m pytest test/api_integration_test.py -v
 # SKIP_AI=1 python3 test/api_integration_test.py  # без вызова платного AI
+```
+
+`Dockerfile.test` собирает сервер и тесты с `-fsanitize=address,undefined`, запускает `parser_tests`
+и прогоняет сервер (metrics + парсеры) под санитайзерами. Локальная санитайзер-сборка:
+
+```bash
+cmake -B build-san -DCMAKE_BUILD_TYPE=Debug \
+  -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer -g" \
+  -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined" \
+  -DCMAKE_PREFIX_PATH=/opt/homebrew   # или путь к POCO
+cmake --build build-san -j$(nproc)
+ASAN_OPTIONS=detect_leaks=0 ./build-san/parser_tests   # detect_leaks=1 на Linux
 ```
 
 ## Формат ответа парсеров диаграмм

@@ -82,7 +82,7 @@ protected:
         HTTPServer srv(new handlers::RouterFactory(), svs, new HTTPServerParams);
         srv.start();
 
-        logger.information("Server started. Endpoints: POST /api/v1/process_with_ai, POST /api/v1/parse_plantuml_sequence, POST /api/v1/parse_plantuml_c4, POST /api/v1/parse_drawio, GET /api/v1/load_confluence?page_id=..., GET /api/v1/parse_confluence?page_id=..., GET /metrics, GET /swagger.yaml");
+        logger.information("Server started. Endpoints: POST /api/v1/process_with_ai, POST /api/v1/process_with_ai_async, GET /api/v1/async_ai_status?request_id=..., GET /api/v1/async_ai_result?request_id=..., POST /api/v1/parse_plantuml_sequence, POST /api/v1/parse_plantuml_c4, POST /api/v1/parse_drawio, GET /api/v1/load_confluence?page_id=..., GET /api/v1/parse_confluence?page_id=..., GET /metrics, GET /swagger.yaml");
 
         waitForTerminationRequest();
         srv.stop();

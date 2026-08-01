@@ -19,6 +19,10 @@
 - если базовый URL уже содержит путь, оканчивающийся на `/` → добавляется `chat/completions`;
 - иначе → `/chat/completions`.
 
+**Транспорт выбирается автоматически по схеме** в `OPENAI_API_URL`:
+- `https://…` → `HTTPSClientSession` (TLS; проверка сертификатов по `OPENAI_SSL_VERIFY`);
+- `http://…` → `HTTPClientSession` (plain HTTP — удобно для локальных OpenAI-совместимых серверов: Ollama, vLLM без TLS и т.п.).
+
 ### Тело (JSON)
 
 ```json
@@ -69,6 +73,14 @@ Authorization: Bearer {OPENAI_API_KEY}
 | Статус API ≠ 200 | `runtime_error("OpenAI API error: {status} - {body}")` | `502` |
 | Нет `choices`/`message` | `runtime_error("No choices/No message…")` | `502` |
 | Некорректный JSON во входе | `Poco::Exception` | `400` |
+
+## Асинхронный режим
+
+Для длинных запросов есть асинхронный API (`process_with_ai_async`): задача выполняется в `Poco::ThreadPool`, клиент получает `request_id` и опрашивает статус/результат через `async_ai_status`/`async_ai_result`. Ретраи, размер пула и лимит задач настраиваются через `OPENAI_MAX_RETRIES`, `OPENAI_ASYNC_MAX_THREADS`, `OPENAI_ASYNC_MAX_JOBS`.
+
+**Ретраи только на транзиентные ошибки**: HTTP-ответы `429` и `5xx` перепосылаются до `OPENAI_MAX_RETRIES` раз; все прочие ошибки (включая `4xx`) завершают задачу сразу. Для этого `OpenAIClient` выбрасывает `OpenAIAPIException` с HTTP-статусом (`httpStatus()`), а менеджер проверяет `429`/`5xx`.
+
+Подробно — [api/process-with-ai-async.md](api/process-with-ai-async.md).
 
 ## Расширяемость
 
