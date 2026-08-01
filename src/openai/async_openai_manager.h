@@ -147,9 +147,9 @@ public:
                 if (!isRetryableHttpStatus(e.httpStatus()) || attempts > maxRetries_) {
                     break;
                 }
-                logger.warning("async AI attempt %d/%d failed for job %lld with HTTP %d: %s",
+                logger.warning("async AI attempt %d/%d failed for job %s with HTTP %d: %s",
                                attempts, maxRetries_ + 1,
-                               static_cast<long long>(id), e.httpStatus(), error);
+                               std::to_string(id), e.httpStatus(), error);
                 Poco::Thread::sleep(400 * attempts);
             } catch (const std::exception& e) {
                 // Не 5xx/429 (ошибка конфигурации, разбора ответа, сети) — не перепосылаем.
@@ -168,13 +168,13 @@ public:
                 it->second.status = AsyncStatus::Completed;
                 it->second.result = result;
                 it->second.error.clear();
-                logger.information("async AI job %lld completed (attempts=%d)",
-                                   static_cast<long long>(id), attempts);
+                logger.information("async AI job %s completed (attempts=%d)",
+                                   std::to_string(id), attempts);
             } else {
                 it->second.status = AsyncStatus::Failed;
                 it->second.error = error;
-                logger.error("async AI job %lld failed after %d attempts: %s",
-                             static_cast<long long>(id), attempts, error);
+                logger.error("async AI job %s failed after %d attempts: %s",
+                             std::to_string(id), attempts, error);
             }
         }
     }

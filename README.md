@@ -178,6 +178,19 @@ curl -X POST http://localhost:8080/api/v1/process_with_ai \
   -H "Content-Type: application/json" \
   -d '{"text": "Write C++ Hello World program"}'
 
+# Асинхронный AI (задача в пуле потоков): запуск -> request_id -> статус -> результат
+RID=$(curl -s -X POST http://localhost:8080/api/v1/process_with_ai_async \
+  -H "Content-Type: application/json" \
+  -d '{"text": "Write C++ Hello World program"}' \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['request_id'])")
+echo "request_id=$RID"
+
+# статус задачи (running | completed | failed, плюс retries/bytes_sent)
+curl "http://localhost:8080/api/v1/async_ai_status?request_id=$RID"
+
+# результат: 200 {result} при completed, 200 {error} при failed, 202 пока выполняется
+curl "http://localhost:8080/api/v1/async_ai_result?request_id=$RID"
+
 # Load Confluence page (через наш API)
 curl "http://localhost:8080/api/v1/load_confluence?page_id=1234567890&include_subpages=1"
 
