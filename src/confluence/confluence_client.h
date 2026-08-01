@@ -41,14 +41,19 @@ struct LoadedConfluencePage {
  * Environment:
  *   CONFLUENCE_URL   - Base URL without trailing slash. On-prem: https://confluence.company.local
  *                      (or with context path, e.g. https://host/confluence). Cloud: https://tenant.atlassian.net
- *   CONFLUENCE_USER  - For Basic auth (username; often still email on Cloud)
- *   CONFLUENCE_TOKEN - Personal Access Token / API token / password (with Basic auth)
+ *   CONFLUENCE_USER  - For Basic auth only (username; often still email on Cloud)
+ *   CONFLUENCE_TOKEN - Personal Access Token (PAT), sent as a Bearer token by default,
+ *                      or API token / password when CONFLUENCE_AUTH_TYPE=basic
+ *   CONFLUENCE_AUTH_TYPE - pat (default) | basic. "pat" sends the token as
+ *                      "Authorization: Bearer <CONFLUENCE_TOKEN>". "basic" sends
+ *                      "Authorization: Basic base64(CONFLUENCE_USER:CONFLUENCE_TOKEN)".
  *   CONFLUENCE_API_TYPE - server | onprem | datacenter | dc (default) = on-prem REST v1.
  *                         cloud | v2 = Atlassian Cloud REST v2.
  *   CONFLUENCE_TIMEOUT - Seconds (default: 30)
  *   CONFLUENCE_SSL_VERIFY - true/false (default: true)
  *
- * Auth: CONFLUENCE_USER set -> Basic auth (user:token). Else Bearer CONFLUENCE_TOKEN.
+ * Auth (default): Bearer with CONFLUENCE_TOKEN (PAT). Set CONFLUENCE_AUTH_TYPE=basic to
+ * use Basic auth with CONFLUENCE_USER:CONFLUENCE_TOKEN instead.
  */
 class ConfluenceClient {
 public:
@@ -57,6 +62,7 @@ public:
           user_(Poco::Environment::get("CONFLUENCE_USER", "")),
           token_(Poco::Environment::get("CONFLUENCE_TOKEN", "")),
           apiType_(parseApiType(Poco::Environment::get("CONFLUENCE_API_TYPE", "server"))),
+          authType_(parseAuthType(Poco::Environment::get("CONFLUENCE_AUTH_TYPE", "pat"))),
           timeoutSec_(parseTimeout(Poco::Environment::get("CONFLUENCE_TIMEOUT", "30"))),
           verifySsl_(parseBool(Poco::Environment::get("CONFLUENCE_SSL_VERIFY", "true"))) {
     }
@@ -114,8 +120,13 @@ public:
         if (bodyHtml.empty()) {
             return json;
         }
+        if (bodyHtml.size() > maxExpandedBodyBytes_) {
+            // Safety: do not attempt recursive expansion on already huge pages.
+            return json;
+        }
         std::set<std::string> processed;
-        std::string expanded = processIncludesRecursively(bodyHtml, processed);
+        size_t macrosProcessed = 0;
+        std::string expanded = processIncludesRecursively(bodyHtml, processed, 0, macrosProcessed);
         return replaceBodyInPageJson(json, expanded);
     }
 
@@ -152,7 +163,7 @@ public:
      */
     LoadedConfluencePage loadPageSubtree(const std::string& pageId, bool resolveIncludes) const {
         std::set<std::string> visited;
-        return loadPageSubtreeImpl(pageId, resolveIncludes, visited);
+        return loadPageSubtreeImpl(pageId, resolveIncludes, visited, 0);
     }
 
     /**
@@ -205,11 +216,16 @@ public:
         try {
             std::string json = doGet("/rest/api/content/" + pageId + "/child/attachment");
             for (const auto& att : extractAllAttachments(json, pageId)) {
-                std::string content = doGet(att.second);
-                if (content.find("<mxfile") != std::string::npos || content.find("<mxGraphModel") != std::string::npos) {
-                    size_t dot = att.first.rfind('.');
-                    std::string base = (dot != std::string::npos) ? att.first.substr(0, dot) : att.first;
-                    out.emplace_back(base, content);
+                if (!shouldFetchAttachmentForDrawioDiscovery(att.title, att.mediaType)) continue;
+                try {
+                    std::string content = doGet(att.path);
+                    if (content.find("<mxfile") != std::string::npos || content.find("<mxGraphModel") != std::string::npos) {
+                        size_t dot = att.title.rfind('.');
+                        std::string base = (dot != std::string::npos) ? att.title.substr(0, dot) : att.title;
+                        out.emplace_back(base, content);
+                    }
+                } catch (...) {
+                    // Skip invalid/too-large/unavailable attachment and keep scanning.
                 }
             }
         } catch (...) {}
@@ -218,7 +234,7 @@ public:
     std::string tryGetDrawioFromPage(const std::string& pageId, const std::string& diagramName) const {
         try {
             std::string json = doGet("/rest/api/content/" + pageId + "/child/attachment");
-            std::vector<std::pair<std::string, std::string>> attachments = extractAllAttachments(json, pageId);
+            auto attachments = extractAllAttachments(json, pageId);
             std::string nameLower = diagramName;
             for (char& c : nameLower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
             if (nameLower.size() >= 7 && nameLower.substr(nameLower.size() - 7) == ".drawio")
@@ -228,17 +244,22 @@ public:
             std::string fallbackXml;
             int drawioCount = 0;
             for (const auto& att : attachments) {
-                std::string content = doGet(att.second);
-                if (content.find("<mxfile") != std::string::npos || content.find("<mxGraphModel") != std::string::npos) {
-                    drawioCount++;
-                    std::string titleLower = att.first;
-                    for (char& c : titleLower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-                    size_t dot = titleLower.rfind('.');
-                    std::string baseName = (dot != std::string::npos) ? titleLower.substr(0, dot) : titleLower;
-                    bool match = (baseName == nameLower || baseName.find(nameLower) != std::string::npos ||
-                                 nameLower.find(baseName) != std::string::npos);
-                    if (match) return content;
-                    if (fallbackXml.empty()) fallbackXml = content;
+                std::string titleLower = att.title;
+                for (char& c : titleLower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                size_t dot = titleLower.rfind('.');
+                std::string baseName = (dot != std::string::npos) ? titleLower.substr(0, dot) : titleLower;
+                bool nameMatch = (baseName == nameLower || baseName.find(nameLower) != std::string::npos ||
+                                  nameLower.find(baseName) != std::string::npos);
+                if (!shouldFetchAttachmentForDrawioLookup(att.title, nameMatch, att.mediaType)) continue;
+                try {
+                    std::string content = doGet(att.path);
+                    if (content.find("<mxfile") != std::string::npos || content.find("<mxGraphModel") != std::string::npos) {
+                        drawioCount++;
+                        if (nameMatch) return content;
+                        if (fallbackXml.empty()) fallbackXml = content;
+                    }
+                } catch (...) {
+                    // Continue with the next attachment.
                 }
             }
             if (!fallbackXml.empty() && drawioCount == 1) return fallbackXml;
@@ -280,15 +301,16 @@ public:
             auto results = obj->getArray("results");
             for (size_t i = 0; i < results->size(); ++i) {
                 auto item = results->getObject(i);
+                if (!item) continue;
                 std::string id;
                 if (item->has("id")) {
                     id = item->getValue<std::string>("id");
                 } else if (item->has("page")) {
                     auto page = item->getObject("page");
-                    if (page->has("id")) id = page->getValue<std::string>("id");
+                    if (page && page->has("id")) id = page->getValue<std::string>("id");
                 } else if (item->has("content")) {
                     auto content = item->getObject("content");
-                    if (content->has("id")) id = content->getValue<std::string>("id");
+                    if (content && content->has("id")) id = content->getValue<std::string>("id");
                 }
                 if (!id.empty()) ids.push_back(id);
             }
@@ -300,6 +322,54 @@ public:
     int getTimeoutSec() const { return timeoutSec_; }
 
 private:
+    static std::string getLowerFileExtension(const std::string& filename) {
+        size_t dot = filename.rfind('.');
+        if (dot == std::string::npos || dot + 1 >= filename.size()) return "";
+        std::string ext = filename.substr(dot + 1);
+        for (char& c : ext) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        return ext;
+    }
+
+    static bool hasBlockedAttachmentExtension(const std::string& filename) {
+        std::string ext = getLowerFileExtension(filename);
+        static const char* blockedExts[] = {
+            "png", "jpg", "jpeg", "docx", "xlsx",
+            // additional heavy/non-diagram formats often present in on-prem spaces
+            "pdf", "ppt", "pptx", "doc", "xls", "zip", "rar", "7z"
+        };
+        for (const char* blocked : blockedExts) {
+            if (ext == blocked) return true;
+        }
+        return false;
+    }
+
+    static bool isLikelyDrawioByExtension(const std::string& filename) {
+        std::string ext = getLowerFileExtension(filename);
+        return ext == "drawio" || ext == "xml";
+    }
+
+    static bool isDrawioByMediaType(const std::string& mediaType) {
+        // Confluence DrawIO macro stores diagrams as extensionless attachments with this media type.
+        return mediaType == "application/vnd.jgraph.mxfile";
+    }
+
+    static bool shouldFetchAttachmentForDrawioDiscovery(const std::string& filename, const std::string& mediaType) {
+        if (hasBlockedAttachmentExtension(filename)) return false;
+        if (isLikelyDrawioByExtension(filename)) return true;
+        // Extensionless drawio attachments (Confluence DrawIO macro) are recognized by media type.
+        return isDrawioByMediaType(mediaType);
+    }
+
+    static bool shouldFetchAttachmentForDrawioLookup(const std::string& filename, bool nameMatch,
+                                                     const std::string& mediaType) {
+        if (hasBlockedAttachmentExtension(filename)) return false;
+        if (isLikelyDrawioByExtension(filename)) return true;
+        if (isDrawioByMediaType(mediaType)) return true;
+        // If extension is absent/unknown, allow only when attachment name matches drawio macro name.
+        std::string ext = getLowerFileExtension(filename);
+        return ext.empty() && nameMatch;
+    }
+
     /** Pagination _links.next (Confluence Cloud REST API v2 children responses). */
     static std::string extractCloudChildrenNextPath(const std::string& jsonStr) {
         try {
@@ -307,6 +377,7 @@ private:
             auto obj = parser.parse(jsonStr).extract<Poco::JSON::Object::Ptr>();
             if (!obj->has("_links")) return "";
             auto links = obj->getObject("_links");
+            if (!links) return "";
             if (!links->has("next")) return "";
             std::string next = links->getValue<std::string>("next");
             if (next.empty() || next[0] != '/') return "";
@@ -344,7 +415,7 @@ private:
     }
 
     LoadedConfluencePage loadPageSubtreeImpl(const std::string& pageId, bool resolveIncludes,
-                                            std::set<std::string>& visited) const {
+                                            std::set<std::string>& visited, size_t depth) const {
         if (visited.count(pageId)) {
             LoadedConfluencePage dup;
             dup.pageId = pageId;
@@ -358,11 +429,15 @@ private:
         node.pageId = pageId;
         node.pageJson = json;
 
+        if (depth >= maxTreeDepth_ || visited.size() >= maxTreeNodes_) {
+            return node;
+        }
+
         try {
             std::vector<std::string> childIds = fetchAllDirectChildPageIds(pageId);
             for (const auto& cid : childIds) {
                 node.children.push_back(
-                    std::make_unique<LoadedConfluencePage>(loadPageSubtreeImpl(cid, resolveIncludes, visited)));
+                    std::make_unique<LoadedConfluencePage>(loadPageSubtreeImpl(cid, resolveIncludes, visited, depth + 1)));
             }
         } catch (...) {}
 
@@ -379,6 +454,19 @@ private:
     }
 
     enum class ApiType { Cloud, Server };
+    enum class AuthType { Bearer, Basic };
+
+    static AuthType parseAuthType(const std::string& s) {
+        std::string lower;
+        for (char c : s) {
+            lower += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        }
+        if (lower == "basic" || lower == "basic-auth" || lower == "userpass" || lower == "user_pass") {
+            return AuthType::Basic;
+        }
+        // Default: Personal Access Token sent as Bearer.
+        return AuthType::Bearer;
+    }
 
     static ApiType parseApiType(const std::string& s) {
         std::string lower;
@@ -423,9 +511,15 @@ private:
         return "";
     }
 
-    static std::vector<std::pair<std::string, std::string>> extractAllAttachments(const std::string& jsonStr,
-                                                                                   const std::string& pageId) {
-        std::vector<std::pair<std::string, std::string>> out;
+    struct AttachmentInfo {
+        std::string title;
+        std::string path;
+        std::string mediaType;
+    };
+
+    static std::vector<AttachmentInfo> extractAllAttachments(const std::string& jsonStr,
+                                                             const std::string& pageId) {
+        std::vector<AttachmentInfo> out;
         try {
             Poco::JSON::Parser parser;
             auto result = parser.parse(jsonStr);
@@ -434,22 +528,29 @@ private:
             auto results = obj->getArray("results");
             for (size_t i = 0; i < results->size(); ++i) {
                 auto item = results->getObject(i);
+                if (!item) continue;
                 if (!item->has("title")) continue;
-                std::string title = item->getValue<std::string>("title");
-                std::string path;
-                if (item->has("_links")) {
-                    auto links = item->getObject("_links");
-                    if (links->has("download")) {
-                        path = links->getValue<std::string>("download");
-                        if (!path.empty() && path[0] != '/') path = "/" + path;
+                AttachmentInfo info;
+                info.title = item->getValue<std::string>("title");
+                if (item->has("extensions")) {
+                    auto ext = item->getObject("extensions");
+                    if (ext && ext->has("mediaType")) {
+                        info.mediaType = ext->getValue<std::string>("mediaType");
                     }
                 }
-                if (path.empty()) {
-                    std::string encoded;
-                    Poco::URI::encode(title, "", encoded);
-                    path = "/download/attachments/" + pageId + "/" + encoded;
+                if (item->has("_links")) {
+                    auto links = item->getObject("_links");
+                    if (links && links->has("download")) {
+                        info.path = links->getValue<std::string>("download");
+                        if (!info.path.empty() && info.path[0] != '/') info.path = "/" + info.path;
+                    }
                 }
-                if (!path.empty()) out.emplace_back(title, path);
+                if (info.path.empty()) {
+                    std::string encoded;
+                    Poco::URI::encode(info.title, "", encoded);
+                    info.path = "/download/attachments/" + pageId + "/" + encoded;
+                }
+                if (!info.path.empty()) out.push_back(std::move(info));
             }
         } catch (...) {}
         return out;
@@ -473,6 +574,7 @@ private:
             std::string nameWithXml = nameLower + ".xml";
             for (size_t i = 0; i < results->size(); ++i) {
                 auto item = results->getObject(i);
+                if (!item) continue;
                 if (!item->has("title")) continue;
                 std::string title = item->getValue<std::string>("title");
                 std::string titleLower = title;
@@ -487,7 +589,7 @@ private:
                 if (isDrawio && nameMatch) {
                     if (item->has("_links")) {
                         auto links = item->getObject("_links");
-                        if (links->has("download")) {
+                        if (links && links->has("download")) {
                             std::string path = links->getValue<std::string>("download");
                             if (!path.empty()) {
                                 if (path[0] != '/') path = "/" + path;
@@ -554,7 +656,7 @@ private:
         std::vector<IncludeMacro> result;
         // Match <ac:structured-macro ac:name="include" ...>...</ac:structured-macro>
         // Use [\s\S] instead of . for multiline (no dotall in older C++/GCC)
-        std::regex macroRe("<ac:structured-macro\\s+ac:name=\"include\"[^>]*>[\\s\\S]*?</ac:structured-macro>",
+        std::regex macroRe("<ac:structured-macro\\b[^>]*\\bac:name=\"include\"[^>]*>[\\s\\S]*?</ac:structured-macro>",
                           std::regex::icase);
         std::sregex_iterator it(html.begin(), html.end(), macroRe);
         std::sregex_iterator end;
@@ -620,12 +722,13 @@ private:
             auto results = obj->getArray("results");
             if (results->size() == 0) return "";
             auto first = results->getObject(0);
+            if (!first) return "";
             if (first->has("id")) {
                 return first->getValue<std::string>("id");
             }
             if (first->has("content")) {
                 auto content = first->getObject("content");
-                if (content->has("id")) {
+                if (content && content->has("id")) {
                     return content->getValue<std::string>("id");
                 }
             }
@@ -636,17 +739,23 @@ private:
     }
 
     std::string processIncludesRecursively(std::string content,
-                                          std::set<std::string>& processed) const {
+                                          std::set<std::string>& processed,
+                                          size_t depth,
+                                          size_t& macrosProcessed) const {
+        if (depth > maxIncludeDepth_) return content;
+        if (content.size() > maxExpandedBodyBytes_) return content;
         auto macros = findIncludeMacros(content);
         if (macros.empty()) return content;
 
         auto& logger = Poco::Logger::get("ConfluenceClient");
         for (const auto& macro : macros) {
+            if (macrosProcessed >= maxIncludeMacros_) return content;
+            ++macrosProcessed;
             const std::string& pageIdOrTitle = macro.pageId;
             std::string resolvedId = resolvePageId(pageIdOrTitle);
             if (resolvedId.empty()) {
                 std::string errMsg = "Cannot resolve page (title or ID): " + pageIdOrTitle;
-                logger.error("%s", errMsg.c_str());
+                logger.error(errMsg);
                 std::string errHtml = "<div class=\"include-error\">[Error: page not found: " + pageIdOrTitle + "]</div>";
                 size_t pos = 0;
                 while ((pos = content.find(macro.fullMacro, pos)) != std::string::npos) {
@@ -656,7 +765,7 @@ private:
                 continue;
             }
             if (processed.count(resolvedId)) {
-                logger.warning("Circular include detected for page: %s", resolvedId.c_str());
+                logger.warning("Circular include detected for page: " + resolvedId);
                 continue;
             }
             std::string includedHtml;
@@ -666,18 +775,24 @@ private:
             } catch (const std::exception& e) {
                 std::string loadErr = "Failed to load included page " + resolvedId +
                     " (resolved from " + pageIdOrTitle + "): " + (e.what() ? e.what() : "unknown");
-                logger.error("%s", loadErr.c_str());
+                logger.error(loadErr);
                 includedHtml = "<div class=\"include-error\">[Error loading included page: " + pageIdOrTitle + "]</div>";
             }
             if (!includedHtml.empty()) {
                 processed.insert(resolvedId);
                 std::set<std::string> subProcessed(processed);
-                includedHtml = processIncludesRecursively(includedHtml, subProcessed);
+                includedHtml = processIncludesRecursively(includedHtml, subProcessed, depth + 1, macrosProcessed);
                 processed = subProcessed;
             }
             // Replace macro with content (simple string replace - macro is exact match)
             size_t pos = 0;
             while ((pos = content.find(macro.fullMacro, pos)) != std::string::npos) {
+                if (content.size() - macro.fullMacro.size() + includedHtml.size() > maxExpandedBodyBytes_) {
+                    std::string cut = "<div class=\"include-error\">[Include expansion limit reached]</div>";
+                    content.replace(pos, macro.fullMacro.size(), cut);
+                    pos += cut.size();
+                    continue;
+                }
                 content.replace(pos, macro.fullMacro.size(), includedHtml);
                 pos += includedHtml.size();
             }
@@ -728,23 +843,27 @@ private:
         Poco::Net::HTTPRequest req(Poco::Net::HTTPRequest::HTTP_GET, fullPath,
                                    Poco::Net::HTTPMessage::HTTP_1_1);
         req.setHost(hostHeader);
+        req.set("User-Agent", "PocoAIServer/1.0 (Diagram Processing Server)");
         req.set("Accept", "application/json");
         req.set("Authorization", buildAuthHeader());
 
         auto& logger = Poco::Logger::get("ConfluenceClient");
         std::string fullUrl = baseUri.getScheme() + "://" + hostHeader + fullPath;
-        logger.information("Confluence request: GET %s", fullUrl);
+        logger.information("Confluence request: GET " + fullUrl);
 
         session.sendRequest(req);
 
         Poco::Net::HTTPResponse res;
         std::istream& rs = session.receiveResponse(res);
 
+        const bool isAttachmentDownload = (fullPath.find("/download/attachments/") != std::string::npos);
         std::string responseBody;
-        Poco::StreamCopier::copyToString(rs, responseBody);
+        copyToStringWithLimit(rs, responseBody,
+                              isAttachmentDownload ? maxAttachmentBytes_ : maxResponseBytes_);
 
         if (res.getStatus() != Poco::Net::HTTPResponse::HTTP_OK) {
-            logger.error("Confluence API error: %d - %s (request was: GET %s)", static_cast<int>(res.getStatus()), responseBody, fullUrl);
+            logger.error("Confluence API error: " + std::to_string(static_cast<int>(res.getStatus())) +
+                         " - " + responseBody + " (request was: GET " + fullUrl + ")");
             throw std::runtime_error("Confluence API error: " + std::to_string(res.getStatus()) + " - " + fullUrl);
         }
 
@@ -752,27 +871,61 @@ private:
     }
 
     std::string buildAuthHeader() const {
-        if (!user_.empty()) {
-            std::string credentials = user_ + ":" + token_;
-            std::stringstream ss;
-            Poco::Base64Encoder encoder(ss);
-            encoder.rdbuf()->setLineLength(0);
-            encoder << credentials;
-            encoder.close();
-            std::string encoded = ss.str();
-            encoded.erase(std::remove_if(encoded.begin(), encoded.end(),
-                [](char c) { return c == '\n' || c == '\r'; }), encoded.end());
-            return "Basic " + encoded;
+        // Default: Confluence Personal Access Token (PAT) as a Bearer token.
+        if (authType_ != AuthType::Basic) {
+            return "Bearer " + token_;
         }
-        return "Bearer " + token_;
+        // Legacy mode (CONFLUENCE_AUTH_TYPE=basic): Basic auth with user:token.
+        std::string credentials = user_ + ":" + token_;
+        std::stringstream ss;
+        Poco::Base64Encoder encoder(ss);
+        encoder.rdbuf()->setLineLength(0);
+        encoder << credentials;
+        encoder.close();
+        std::string encoded = ss.str();
+        encoded.erase(std::remove_if(encoded.begin(), encoded.end(),
+            [](char c) { return c == '\n' || c == '\r'; }), encoded.end());
+        return "Basic " + encoded;
+    }
+
+    static size_t parseSizeBytes(const std::string& s, size_t defaultVal) {
+        try {
+            int parsed = Poco::NumberParser::parse(s);
+            return parsed > 0 ? static_cast<size_t>(parsed) : defaultVal;
+        } catch (...) {
+            return defaultVal;
+        }
+    }
+
+    static void copyToStringWithLimit(std::istream& in, std::string& out, size_t maxBytes) {
+        out.clear();
+        out.reserve(std::min<size_t>(maxBytes, 1 << 20));
+        char buf[8192];
+        while (in.good()) {
+            in.read(buf, sizeof(buf));
+            std::streamsize n = in.gcount();
+            if (n <= 0) break;
+            if (out.size() + static_cast<size_t>(n) > maxBytes) {
+                throw std::runtime_error("Confluence response too large");
+            }
+            out.append(buf, static_cast<size_t>(n));
+        }
     }
 
     std::string baseUrl_;
     std::string user_;
     std::string token_;
     ApiType apiType_;
+    AuthType authType_;
     int timeoutSec_;
     bool verifySsl_;
+    size_t maxAttachmentBytes_ = parseSizeBytes(Poco::Environment::get("CONFLUENCE_ATTACHMENT_MAX_BYTES", "8388608"), 8388608);
+    size_t maxResponseBytes_ = parseSizeBytes(Poco::Environment::get("CONFLUENCE_RESPONSE_MAX_BYTES", "52428800"), 52428800);
+    size_t maxTreeDepth_ = parseSizeBytes(Poco::Environment::get("CONFLUENCE_MAX_TREE_DEPTH", "200"), 200);
+    size_t maxTreeNodes_ = parseSizeBytes(Poco::Environment::get("CONFLUENCE_MAX_TREE_NODES", "5000"), 5000);
+    size_t maxIncludeDepth_ = parseSizeBytes(Poco::Environment::get("CONFLUENCE_MAX_INCLUDE_DEPTH", "20"), 20);
+    size_t maxIncludeMacros_ = parseSizeBytes(Poco::Environment::get("CONFLUENCE_MAX_INCLUDE_MACROS", "2000"), 2000);
+    size_t maxExpandedBodyBytes_ = parseSizeBytes(Poco::Environment::get("CONFLUENCE_MAX_EXPANDED_BODY_BYTES", "16777216"), 16777216);
 };
 
 } // namespace confluence

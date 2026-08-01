@@ -40,7 +40,7 @@ public:
 
 private:
     static void extractPlantUML(const std::string& html, std::vector<Diagram>& out) {
-        std::regex macroRe("<ac:structured-macro\\s+ac:name=\"plantuml\"[^>]*>[\\s\\S]*?</ac:structured-macro>",
+        std::regex macroRe("<ac:structured-macro\\b[^>]*\\bac:name=\"plantuml\"[^>]*>[\\s\\S]*?</ac:structured-macro>",
                           std::regex::icase);
         std::sregex_iterator it(html.begin(), html.end(), macroRe);
         std::sregex_iterator end;
@@ -97,7 +97,7 @@ private:
 
     static void extractDrawIO(const std::string& html, std::vector<Diagram>& out) {
         for (const char* name : {"drawio", "draw.io", "draw-io"}) {
-            std::string pattern = "<ac:structured-macro\\s+ac:name=\"" + std::string(name) + "\"[^>]*>[\\s\\S]*?</ac:structured-macro>";
+            std::string pattern = "<ac:structured-macro\\b[^>]*\\bac:name=\"" + std::string(name) + "\"[^>]*>[\\s\\S]*?</ac:structured-macro>";
             std::regex macroRe(pattern, std::regex::icase);
             std::sregex_iterator it(html.begin(), html.end(), macroRe);
             std::sregex_iterator end;

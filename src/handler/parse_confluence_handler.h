@@ -9,6 +9,8 @@
 #include <Poco/JSON/Object.h>
 #include <Poco/JSON/Array.h>
 #include <Poco/JSON/Stringifier.h>
+#include <Poco/Environment.h>
+#include <Poco/NumberParser.h>
 
 #include "request_counter.h"
 #include "../confluence/confluence_client.h"
@@ -17,13 +19,15 @@
 #include <set>
 #include <algorithm>
 #include <cctype>
-#include <regex>
 #include <sstream>
 #include <functional>
 #include <string>
 #include <utility>
 #include <unordered_set>
+#include <unordered_map>
 #include <vector>
+#include <deque>
+#include <cstdlib>
 
 namespace handlers {
 
@@ -67,11 +71,44 @@ public:
             // Global deduplication to ensure no duplicate diagrams are returned
             // even if they come from multiple macro/embed/plugin variants or multiple pages.
             std::unordered_set<size_t> emittedDiagramHashes;
+            ParseProgress progress;
 
             if (useIncludes) {
-                confluence::LoadedConfluencePage tree = client.loadPageSubtree(pageId, true);
-                std::string rootHtml = confluence::ConfluenceClient::storageHtmlFromPageJson(tree.pageJson);
-                if (rootHtml.empty()) {
+                auto pagesWithDepth = collectPageIdsWithDepth(client, pageId, logger, progress);
+
+                bool hasAnyHtml = false;
+                for (const auto& p : pagesWithDepth) {
+                    const std::string& pid = p.first;
+                    const size_t depth = p.second;
+                    try {
+                        std::string html = client.getPageBodyWithIncludes(pid);
+                        progress.resourcesLoaded++;
+                        logger.information(
+                            "parse_confluence progress: depth=" + std::to_string(depth) +
+                            " resources_loaded=" + std::to_string(progress.resourcesLoaded) +
+                            " pages_processed=" + std::to_string(progress.pagesProcessed) +
+                            " stage=page_body page_id=" + pid);
+                        if (html.empty()) continue;
+                        if (html.size() > maxParsePageBytes()) {
+                            logger.warning(
+                                "parse_confluence skip page: page_id=" + pid +
+                                " depth=" + std::to_string(depth) +
+                                " reason=page_body_too_large bytes=" + std::to_string(html.size()));
+                            continue;
+                        }
+                        hasAnyHtml = true;
+                        appendDiagramsForPage(pid, html, client, diagramRows, resolvedKeys, emittedDiagramHashes, false);
+                        progress.pagesProcessed++;
+                        logger.information(
+                            "parse_confluence progress: depth=" + std::to_string(depth) +
+                            " resources_loaded=" + std::to_string(progress.resourcesLoaded) +
+                            " pages_processed=" + std::to_string(progress.pagesProcessed) +
+                            " stage=page_parsed page_id=" + pid);
+                    } catch (...) {
+                        // Skip failed page and continue with the rest.
+                    }
+                }
+                if (!hasAnyHtml) {
                     response.setStatus(Poco::Net::HTTPResponse::HTTP_BAD_GATEWAY);
                     std::ostream& ostr = response.send();
                     ostr << R"({"error":"Failed to load page content"})";
@@ -79,9 +116,14 @@ public:
                     logDuration(start, request, 502, logger);
                     return;
                 }
-                appendDiagramsFromPageTree(tree, client, diagramRows, resolvedKeys, emittedDiagramHashes);
             } else {
                 std::string html = client.getPageBodyById(pageId);
+                progress.resourcesLoaded++;
+                logger.information(
+                    "parse_confluence progress: depth=0 resources_loaded=" +
+                    std::to_string(progress.resourcesLoaded) +
+                    " pages_processed=" + std::to_string(progress.pagesProcessed) +
+                    " stage=page_body page_id=" + pageId);
                 if (html.empty()) {
                     response.setStatus(Poco::Net::HTTPResponse::HTTP_BAD_GATEWAY);
                     std::ostream& ostr = response.send();
@@ -90,7 +132,24 @@ public:
                     logDuration(start, request, 502, logger);
                     return;
                 }
+                if (html.size() > maxParsePageBytes()) {
+                    response.setStatus(Poco::Net::HTTPResponse::HTTP_BAD_GATEWAY);
+                    std::ostream& ostr = response.send();
+                    ostr << R"({"error":"Page body too large for parsing"})";
+                    if (g_httpErrors) g_httpErrors->inc();
+                    logger.warning(
+                        "parse_confluence skip root page: page_id=" + pageId +
+                        " reason=page_body_too_large bytes=" + std::to_string(html.size()));
+                    logDuration(start, request, 502, logger);
+                    return;
+                }
                 appendDiagramsForPage(pageId, html, client, diagramRows, resolvedKeys, emittedDiagramHashes, false);
+                progress.pagesProcessed++;
+                logger.information(
+                    "parse_confluence progress: depth=0 resources_loaded=" +
+                    std::to_string(progress.resourcesLoaded) +
+                    " pages_processed=" + std::to_string(progress.pagesProcessed) +
+                    " stage=page_parsed page_id=" + pageId);
             }
 
             Poco::JSON::Object root;
@@ -130,7 +189,7 @@ public:
                 ostr << R"({"error":")" << escapeJson(errMsg) << "\"}";
             }
             if (g_httpErrors) g_httpErrors->inc();
-            logger.error("parse_confluence: %s", errMsg.c_str());
+            logger.error("parse_confluence: " + errMsg);
             logDuration(start, request, response.getStatus(), logger);
 
         } catch (const std::exception& e) {
@@ -138,12 +197,61 @@ public:
             std::ostream& ostr = response.send();
             ostr << R"({"error":"Internal error"})";
             if (g_httpErrors) g_httpErrors->inc();
-            logger.error("parse_confluence: %s", e.what());
+            logger.error("parse_confluence: " + std::string(e.what()));
             logDuration(start, request, 500, logger);
         }
     }
 
 private:
+    struct ParseProgress {
+        size_t resourcesLoaded = 0;
+        size_t pagesProcessed = 0;
+    };
+
+    static size_t maxParsePageBytes() {
+        try {
+            int v = Poco::NumberParser::parse(Poco::Environment::get("CONFLUENCE_PARSE_PAGE_MAX_BYTES", "4194304"));
+            return v > 0 ? static_cast<size_t>(v) : 4194304u;
+        } catch (...) {
+            return 4194304u;
+        }
+    }
+
+    static std::vector<std::pair<std::string, size_t>> collectPageIdsWithDepth(
+        confluence::ConfluenceClient& client,
+        const std::string& rootPageId,
+        Poco::Logger& logger,
+        ParseProgress& progress) {
+        std::vector<std::pair<std::string, size_t>> ordered;
+        std::deque<std::pair<std::string, size_t>> q;
+        std::unordered_set<std::string> seen;
+        q.emplace_back(rootPageId, 0);
+        seen.insert(rootPageId);
+
+        while (!q.empty()) {
+            auto cur = q.front();
+            q.pop_front();
+            const std::string& pid = cur.first;
+            const size_t depth = cur.second;
+            ordered.push_back(cur);
+
+            try {
+                std::string childrenJson = client.getChildPages(pid);
+                progress.resourcesLoaded++;
+                logger.information(
+                    "parse_confluence progress: depth=" + std::to_string(depth) +
+                    " resources_loaded=" + std::to_string(progress.resourcesLoaded) +
+                    " pages_processed=" + std::to_string(progress.pagesProcessed) +
+                    " stage=child_list page_id=" + pid);
+                auto childIds = confluence::ConfluenceClient::extractChildPageIds(childrenJson);
+                for (const auto& cid : childIds) {
+                    if (seen.insert(cid).second) q.emplace_back(cid, depth + 1);
+                }
+            } catch (...) {}
+        }
+        return ordered;
+    }
+
     static size_t diagramHash(const confluence::Diagram& d) {
         // Collision risk exists for hashes, but this is acceptable for "best-effort" dedup.
         size_t h = std::hash<std::string>{}(d.text);
@@ -184,51 +292,49 @@ private:
     }
 
     static std::vector<std::string> extractInlinePlantUmlCodeFromHtml(const std::string& html) {
-        // Best-effort: capture PlantUML code that appears as CDATA/plain-text-body even if
-        // the surrounding macro name isn't exactly "plantuml".
         std::vector<std::string> out;
-        std::regex cdataRe("<!\\[CDATA\\[([\\s\\S]*?@startuml[\\s\\S]*?@enduml[\\s\\S]*?)\\]\\]>",
-                           std::regex::icase);
-        std::sregex_iterator it1(html.begin(), html.end(), cdataRe);
-        std::sregex_iterator end;
-        for (; it1 != end; ++it1) {
-            out.push_back((*it1)[1].str());
-            if (out.size() >= 200) break;
-        }
-
-        std::regex ptbRe("<ac:plain-text-body[^>]*>([\\s\\S]*?@startuml[\\s\\S]*?@enduml[\\s\\S]*?)</ac:plain-text-body>",
-                          std::regex::icase);
-        std::sregex_iterator it2(html.begin(), html.end(), ptbRe);
-        for (; it2 != end; ++it2) {
-            out.push_back((*it2)[1].str());
-            if (out.size() >= 200) break;
+        size_t pos = 0;
+        while (out.size() < 200) {
+            size_t start = html.find("@startuml", pos);
+            if (start == std::string::npos) break;
+            size_t end = html.find("@enduml", start);
+            if (end == std::string::npos) break;
+            end += std::string("@enduml").size();
+            out.push_back(html.substr(start, end - start));
+            pos = end;
         }
         return out;
     }
 
     static std::vector<std::string> extractInlineDrawioXmlFromHtml(const std::string& html) {
-        // Best-effort: plugin/embedded variants may not be wrapped into ac:structured-macro
-        // with ac:name="drawio". In on-prem storage HTML the actual diagram XML usually still
-        // contains <mxfile> or <mxGraphModel> tags.
         std::vector<std::string> out;
-
-        std::regex mxfileRe("<mxfile[^>]*>[\\s\\S]*?</mxfile>", std::regex::icase);
-        std::sregex_iterator it1(html.begin(), html.end(), mxfileRe);
-        std::sregex_iterator end;
-        for (; it1 != end; ++it1) {
-            out.push_back((*it1).str());
-            if (out.size() >= 200) break; // safety
+        size_t pos = 0;
+        while (out.size() < 200) {
+            size_t start = html.find("<mxfile", pos);
+            if (start == std::string::npos) break;
+            size_t end = html.find("</mxfile>", start);
+            if (end == std::string::npos) break;
+            end += std::string("</mxfile>").size();
+            out.push_back(html.substr(start, end - start));
+            pos = end;
         }
 
-        std::regex mxGraphModelRe("<mxGraphModel[^>]*>[\\s\\S]*?</mxGraphModel>", std::regex::icase);
-        std::sregex_iterator it2(html.begin(), html.end(), mxGraphModelRe);
-        for (; it2 != end; ++it2) {
-            std::string xml = (*it2).str();
-            // Avoid duplicates like when <mxGraphModel> is inside already captured <mxfile>.
-            if (xml.find("<mxfile") == std::string::npos) out.push_back(std::move(xml));
-            if (out.size() >= 200) break;
+        pos = 0;
+        while (out.size() < 200) {
+            size_t start = html.find("<mxGraphModel", pos);
+            if (start == std::string::npos) break;
+            size_t end = html.find("</mxGraphModel>", start);
+            if (end == std::string::npos) break;
+            end += std::string("</mxGraphModel>").size();
+            out.push_back(html.substr(start, end - start));
+            pos = end;
         }
         return out;
+    }
+
+    static bool regexParsingEnabled() {
+        std::string v = Poco::Environment::get("CONFLUENCE_REGEX_PARSING_ENABLED", "false");
+        return v == "1" || v == "true" || v == "TRUE";
     }
 
     static void appendDiagramsForPage(const std::string& sourcePageId,
@@ -238,7 +344,10 @@ private:
                                       std::set<std::string>& resolvedKeys,
                                       std::unordered_set<size_t>& emittedDiagramHashes,
                                       bool searchDescendantsForAttachments) {
-        auto diagrams = confluence::ConfluenceParser::parse(html);
+        std::vector<confluence::Diagram> diagrams;
+        if (regexParsingEnabled()) {
+            diagrams = confluence::ConfluenceParser::parse(html);
+        }
 
         for (auto& d : diagrams) {
             if (d.format == confluence::DiagramFormat::DrawIO && d.subtype == "attachment" &&
@@ -257,8 +366,7 @@ private:
             }
         }
 
-        // Fallback for embed/plugin: ConfluenceParser might miss some macro names.
-        // If we detect DrawIO XML directly in storage HTML, include it as diagrams too.
+        // Safe default path: detect DrawIO XML directly in storage HTML.
         std::unordered_set<size_t> existingInlineHashes;
         for (const auto& d : diagrams) {
             if (d.format != confluence::DiagramFormat::DrawIO) continue;
@@ -281,15 +389,7 @@ private:
             }
         }
 
-        for (auto& d : diagrams) {
-            size_t h = diagramHash(d);
-            if (emittedDiagramHashes.insert(h).second) {
-                out.emplace_back(sourcePageId, std::move(d));
-            }
-        }
-
-        // Fallback for embed/plugin variants: PlantUML code may exist in storage HTML without
-        // being wrapped by ac:name="plantuml" exactly. Add it best-effort.
+        // Safe default path: detect PlantUML code directly in storage HTML.
         std::unordered_set<size_t> existingPlantHashes;
         for (const auto& d : diagrams) {
             if (d.format != confluence::DiagramFormat::PlantUML) continue;
@@ -315,6 +415,13 @@ private:
             existingPlantHashes.insert(h);
         }
 
+        for (auto& d : diagrams) {
+            size_t h = diagramHash(d);
+            if (emittedDiagramHashes.insert(h).second) {
+                out.emplace_back(sourcePageId, std::move(d));
+            }
+        }
+
         auto discovered = client.getDrawioAttachmentsByContent(sourcePageId, searchDescendantsForAttachments);
         for (const auto& p : discovered) {
             std::string key = sourcePageId + "|" + normalizeDiagramName(p.first);
@@ -337,14 +444,22 @@ private:
                                            std::vector<std::pair<std::string, confluence::Diagram>>& out,
                                            std::set<std::string>& resolvedKeys,
                                            std::unordered_set<size_t>& emittedDiagramHashes) {
-        if (!node.circularSkip) {
-            std::string html = confluence::ConfluenceClient::storageHtmlFromPageJson(node.pageJson);
-            if (!html.empty()) {
-                appendDiagramsForPage(node.pageId, html, client, out, resolvedKeys, emittedDiagramHashes, false);
+        // Iterative traversal to avoid stack overflows on deep page trees.
+        std::deque<const confluence::LoadedConfluencePage*> queue;
+        queue.push_back(&node);
+        while (!queue.empty()) {
+            const confluence::LoadedConfluencePage* cur = queue.front();
+            queue.pop_front();
+            if (!cur || cur->circularSkip) {
+                continue;
             }
-        }
-        for (const auto& ch : node.children) {
-            appendDiagramsFromPageTree(*ch, client, out, resolvedKeys, emittedDiagramHashes);
+            std::string html = confluence::ConfluenceClient::storageHtmlFromPageJson(cur->pageJson);
+            if (!html.empty()) {
+                appendDiagramsForPage(cur->pageId, html, client, out, resolvedKeys, emittedDiagramHashes, false);
+            }
+            for (const auto& ch : cur->children) {
+                if (ch) queue.push_back(ch.get());
+            }
         }
     }
 
