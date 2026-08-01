@@ -123,7 +123,13 @@ docker run -p 8080:8080 --env-file .env poco_template_server
 ## Прогон тестов
 
 ```bash
+# Юнит-тесты парсеров (Google Test)
 docker build -f Dockerfile.test -t poco_ai_server_test . && docker run --rm poco_ai_server_test
+
+# Интеграционные тесты всех API (нужен запущенный сервер + .env с Confluence)
+python3 test/api_integration_test.py        # standalone (stdlib)
+python3 -m pytest test/api_integration_test.py -v
+# SKIP_AI=1 python3 test/api_integration_test.py  # без вызова платного AI
 ```
 
 ## Формат ответа парсеров диаграмм

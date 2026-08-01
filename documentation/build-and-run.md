@@ -52,6 +52,33 @@ cd build && ctest --output-on-failure   # или ./parser_tests
 - PlantUML Sequence: `simple_sequence`, `arrows_only`, `large_sequence`
 - PlantUML C4: `rectangle_c4`, `c4_lib`
 - DrawIO: `simple_c4`, `multi_component`, `complex`
+
+### Интеграционные тесты API (`test/api_integration_test.py`)
+
+Проверяют **все HTTP-эндпоинты** против запущенного сервера и реального Confluence (по умолчанию страницы `1135648503` и `724160182`). Требуют поднятый сервер и настроенный `CONFLUENCE_*` в `.env`.
+
+```bash
+# сервер должен быть запущен
+docker-compose up -d --build
+
+# standalone-раннер (только stdlib, без зависимостей)
+python3 test/api_integration_test.py
+
+# или под pytest
+python3 -m pytest test/api_integration_test.py -v
+```
+
+Полезные переменные окружения:
+
+| Переменная | По умолчанию | Описание |
+|---|---|---|
+| `API_BASE_URL` | `http://localhost:8080` | базовый URL сервера |
+| `PAGE_ID_1` | `1135648503` | страница с PlantUML-диаграммами |
+| `PAGE_ID_2` | `724160182` | страница с DrawIO-диаграммами |
+| `SKIP_AI=1` | выкл | пропустить `process_with_ai` (реальный вызов API, расходует кредиты) |
+| `TEST_TIMEOUT` | `120` | таймаут запроса, сек |
+
+Что покрывается: `process_with_ai` (успех + ошибки), все три парсера (валидные/невалидные входы), `load_confluence` и `parse_confluence` (обе страницы, `include_subpages`, ошибка без `page_id`), пайплайн `parse_confluence → parse_drawio`, `metrics`, `swagger.yaml`, `404`/`400`, утилита `json2dot.py`.
 - Confluence-парсер: `mixed_diagrams`, `plantuml_only`
 - JSON-разбор Confluence-клиента: `extractChildPageIds` (v2-формат, server-обёртка, пустые результаты)
 
